@@ -7,6 +7,11 @@ import pickle as pkl
 
 from xgboost import XGBRegressor
 
+from data_helper import load_all_data
+from recommender_utils import run_feature_selection
+
+food_feats, non_food_feats, prep_data = load_all_data()
+
 model_class = Pipeline
 model_params = {
     'steps': [
