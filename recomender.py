@@ -1,3 +1,5 @@
+import numpy as np
+from pathlib import Path
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -11,6 +13,13 @@ from data_helper import load_all_data
 from recommender_utils import run_feature_selection
 
 food_feats, non_food_feats, prep_data = load_all_data()
+
+w_est = np.loadtxt("./data/W_est.csv", delimiter=",")
+
+s = Path('./data/intra_nodes.txt').read_text(encoding="utf-8").strip()
+row_and_col_names = [x.strip() for x in s.strip("[]").split(",")]
+
+print(row_and_col_names)
 
 model_class = Pipeline
 model_params = {
