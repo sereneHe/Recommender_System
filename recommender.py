@@ -113,3 +113,99 @@ if __name__ == "__main__":
     result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names)
 
     print(result)
+
+
+"""
+model_class = Pipeline
+model_params = {
+    'steps': [
+        ("scale", StandardScaler()),
+        ("linreg", LinearRegression())
+    ]
+}
+model_name = 'REG'
+"""
+
+"""
+model_class = Pipeline
+model_params = {
+    'steps': [
+        ("DT",DecisionTreeRegressor(max_depth=3,min_samples_leaf=10))        
+    ]
+}
+model_name = 'DT'
+"""
+
+
+"""
+model_class = Pipeline
+model_params = {
+    'steps': [
+        ("RF",RandomForestRegressor(n_estimators=3, 
+            max_depth=3,min_samples_leaf=10,
+            n_jobs = 10)
+        )        
+    ]
+}
+model_name = 'RF'
+"""
+
+"""
+(n_estimators=100, 
+criterion='squared_error', 
+max_depth=None, 
+min_samples_split=2, min_samples_leaf=1, 
+min_weight_fraction_leaf=0.0, 
+max_features=1.0, 
+max_leaf_nodes=None, 
+min_impurity_decrease=0.0, 
+bootstrap=True, oob_score=False, 
+n_jobs=None, random_state=None, verbose=0, 
+"""
+
+"""
+from sklearn.kernel_ridge import KernelRidge
+model_class = Pipeline
+model_params = {
+    'steps': [
+        ("scale", StandardScaler()),
+        ("kerreg", KernelRidge(alpha=.5, kernel='rbf', gamma=1e-2))
+    ]
+}
+model_name = 'KerREG'
+"""
+
+""""
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel
+
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+
+# Option 1: ignore all ConvergenceWarning (global, simplest)
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+
+def model_factory(d):
+    #d = len(full_feats)
+    kernel = RBF(length_scale=np.ones(d), length_scale_bounds=(1e-2, 1e2))
+
+    model_class = Pipeline
+    model_params = {
+        'steps': [
+            ("scale", StandardScaler()),
+            ("GP",GaussianProcessRegressor(kernel=kernel, 
+                                           alpha=1., 
+                                           normalize_y=True, 
+                                           n_restarts_optimizer=3,
+                                          )
+            )        
+        ]
+    }
+    model_name = 'GP'
+    return model_class, model_params
+
+model_class = None
+model_params = None
+
+"""
