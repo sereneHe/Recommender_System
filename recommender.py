@@ -16,21 +16,29 @@ from recommender_utils import run_feature_selection
 
 
 def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names):
-
     model_class = Pipeline
     model_params = {
         'steps': [
             ("scale", StandardScaler()),
-            ("xgb", XGBRegressor(
-                n_estimators=10,
-                max_depth=3,
-                learning_rate=0.1,
-                random_state=42,
-            )
-             )
+            ("linreg", LinearRegression())
         ]
     }
-    model_name = 'XGB'
+    model_name = 'REG'
+
+    # model_class = Pipeline
+    # model_params = {
+    #     'steps': [
+    #         ("scale", StandardScaler()),
+    #         ("xgb", XGBRegressor(
+    #             n_estimators=10,
+    #             max_depth=3,
+    #             learning_rate=0.1,
+    #             random_state=42,
+    #         )
+    #          )
+    #     ]
+    # }
+    # model_name = 'XGB'
 
     model_factory = None
 
