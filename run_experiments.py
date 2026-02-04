@@ -42,14 +42,15 @@ def start_experiment(cfg: DictConfig) -> None:
             with z.open("W_est.csv") as f:
                 w_est = np.loadtxt(f, delimiter=",")
             # w_est = np.loadtxt("./data/W_est.csv", delimiter=",")
-
+        mlflow.log_artifact("./data/W_est.csv.zip")
         s = Path('./data/intra_nodes.txt').read_text(encoding="utf-8").strip()
+        mlflow.log_text(s, 'intra_nodes.txt')
         row_and_col_names = [x.strip() for x in s.strip("[]").split(",")]
 
         print(row_and_col_names)
         start_time = time.time()
 
-        result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names)
+        result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs)
 
         print(result)
 
@@ -57,7 +58,8 @@ def start_experiment(cfg: DictConfig) -> None:
 
         for target_feat, (curr_feats, curr_train_errs, curr_test_errs) in result.items():
 
-            target_feat = target_feat.replace(' ', '_').replace('(', '_').replace(')', '_')
+            target_feat = target_feat.replace(' ', '_').replace('(', '_').replace(')', '_').replace('/', '_')
+            mlflow.log_text("\n".join(curr_feats) + "\n", target_feat + "_vs_selected_feats_list.txt")
 
             train_err = curr_train_errs[-1]
             test_err = curr_test_errs[-1]

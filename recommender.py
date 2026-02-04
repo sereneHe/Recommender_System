@@ -1,3 +1,4 @@
+import mlflow
 import numpy as np
 import zipfile
 from pathlib import Path
@@ -15,7 +16,7 @@ from recommender_utils import run_feature_selection
 
 
 
-def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names):
+def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs):
 
     def custom_mse_obj(y_true, y_pred):
         # L = 0.5 * (y_pred - y_true)^2
@@ -23,39 +24,40 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
         hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
         return grad, hess
 
+    if model_name == 'XGB':
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("xgb", XGBRegressor(
+                    n_estimators=10,
+                    max_depth=3,
+                    learning_rate=0.1,
+                    random_state=42,
+                    objective=custom_mse_obj if custom_objective == 'lagrange' else "reg:squarederror" #custom_se #
+                )
+                 )
+            ]
+        }
+    #model_name = 'XGB'
+    elif model_name == 'REG':
 
-    model_class = Pipeline
-    model_params = {
-        'steps': [
-            ("scale", StandardScaler()),
-            ("xgb", XGBRegressor(
-                n_estimators=10,
-                max_depth=3,
-                learning_rate=0.1,
-                random_state=42,
-                objective=custom_mse_obj # "reg:squarederror" #custom_se #
-            )
-             )
-        ]
-    }
-    model_name = 'XGB'
-
-    # model_class = Pipeline
-    # model_params = {
-    #     'steps': [
-    #         ("scale", StandardScaler()),
-    #         ("linreg", LinearRegression())
-    #     ]
-    # }
-    # model_name = 'REG'
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("linreg", LinearRegression())
+            ]
+        }
+        #model_name = 'REG'
 
     model_factory = None
 
-    N_SELECT_FEATURES = 5
+    #N_SELECT_FEATURES = 5
 
     # evaluate a feature sequence
-    n_runs = 40
-    # n_runs = 2
+    #n_runs = 40
+    ## n_runs = 2
 
     food_feats_orig = ["TKCAL", "WHOLEFRT", "MONOPOLY", "ALLMEAT", "SEAPLANT", "ADDSUGC", "SOLFATC", "TALCO",
                        "T_F_TOTAL", "T_G_WHOLE", "T_D_TOTAL", "TSFAT", "TSODI", "T_G_REFINED", "EMPTYCAL10",
@@ -98,6 +100,8 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
     # seed = seed_rng.integers(low=0, high=100000, size=1)[0]
     # print(f'Running with seed: {seed}')
     # rng = np.random.default_rng(seed)
+
+    mlflow.log_text("\n".join(full_feats) + "\n", "full_feats_list.txt")
 
     res_dict = {}
 

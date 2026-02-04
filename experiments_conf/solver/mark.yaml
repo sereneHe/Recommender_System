@@ -1,3 +1,5 @@
 name: mark
-
-
+model_name: XGB
+custom_objective: lagrange
+N_SELECT_FEATURES: 5
+n_runs: 40
