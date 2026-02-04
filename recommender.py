@@ -16,29 +16,38 @@ from recommender_utils import run_feature_selection
 
 
 def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names):
+
+    def custom_mse_obj(y_true, y_pred):
+        # L = 0.5 * (y_pred - y_true)^2
+        grad = y_pred - y_true # grad = dL/dy_pred = (y_pred - y_true)
+        hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
+        return grad, hess
+
+
     model_class = Pipeline
     model_params = {
         'steps': [
             ("scale", StandardScaler()),
-            ("linreg", LinearRegression())
+            ("xgb", XGBRegressor(
+                n_estimators=10,
+                max_depth=3,
+                learning_rate=0.1,
+                random_state=42,
+                objective=custom_mse_obj # "reg:squarederror" #custom_se #
+            )
+             )
         ]
     }
-    model_name = 'REG'
+    model_name = 'XGB'
 
     # model_class = Pipeline
     # model_params = {
     #     'steps': [
     #         ("scale", StandardScaler()),
-    #         ("xgb", XGBRegressor(
-    #             n_estimators=10,
-    #             max_depth=3,
-    #             learning_rate=0.1,
-    #             random_state=42,
-    #         )
-    #          )
+    #         ("linreg", LinearRegression())
     #     ]
     # }
-    # model_name = 'XGB'
+    # model_name = 'REG'
 
     model_factory = None
 

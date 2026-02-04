@@ -38,7 +38,7 @@ def run_feature_selection(prep_data, model_class, model_params,
     curr_test_errs = []
     curr_train_errs = []
 
-    curr_test_error = 1.
+    curr_test_error = 100000.
 
     print(f'====== {target_col} ')
     for i in range(n_features):
