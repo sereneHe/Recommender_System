@@ -18,38 +18,7 @@ from recommender_utils import run_feature_selection
 
 def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs):
     assert custom_objective in ['lagrange', 'mse_builtin']
-    def custom_mse_obj(y_true, y_pred):
-        # L = 0.5 * (y_pred - y_true)^2
-        grad = y_pred - y_true # grad = dL/dy_pred = (y_pred - y_true)
-        hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
-        return grad, hess
 
-    if model_name == 'XGB':
-        model_class = Pipeline
-        model_params = {
-            'steps': [
-                ("scale", StandardScaler()),
-                ("xgb", XGBRegressor(
-                    n_estimators=10,
-                    max_depth=3,
-                    learning_rate=0.1,
-                    random_state=42,
-                    objective=custom_mse_obj if custom_objective == 'lagrange' else "reg:squarederror" #custom_se #
-                )
-                 )
-            ]
-        }
-    #model_name = 'XGB'
-    elif model_name == 'REG':
-
-        model_class = Pipeline
-        model_params = {
-            'steps': [
-                ("scale", StandardScaler()),
-                ("linreg", LinearRegression())
-            ]
-        }
-        #model_name = 'REG'
 
     model_factory = None
 
@@ -108,7 +77,8 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
     for target_col in target_columns:
         curr_feats, curr_train_errs, curr_test_errs = run_feature_selection(
             prep_data,
-            model_class, model_params,
+            model_name,
+            custom_objective,
             target_col,
             n_runs, N_SELECT_FEATURES,
             full_feats,

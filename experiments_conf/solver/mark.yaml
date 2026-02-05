@@ -1,5 +1,5 @@
 name: mark
 model_name: XGB
-custom_objective: mse_builtin # lagrange
+custom_objective: lagrange #mse_builtin #
 N_SELECT_FEATURES: 5
 n_runs: 40

@@ -4,14 +4,14 @@ from compute_tools import compute_predictor_errors
 
 
 def get_mean_average_errors(prep_data, run_feats, target_col,
-                            model_class, model_params,
+                            model_name, custom_objective,
                             n_runs):
     run_res = []
     for i in range(n_runs):
         run_res.append(
             compute_predictor_errors(prep_data, run_feats, target_col,
-                                     model_class=model_class,
-                                     model_params=model_params,
+                                     model_name=model_name,
+                                     custom_objective=custom_objective,
                                      do_print=False, stack_linear=False,
                                      compute_covs=False
                                      )
@@ -26,7 +26,7 @@ def get_mean_average_errors(prep_data, run_feats, target_col,
 from time import time
 
 
-def run_feature_selection(prep_data, model_class, model_params,
+def run_feature_selection(prep_data, model_name,custom_objective,
                           target_col,
                           n_runs, n_features,
                           full_feats,
@@ -54,7 +54,7 @@ def run_feature_selection(prep_data, model_class, model_params,
         for feat in candidate_feats:
             train_ratio_mean, test_ratio_mean = get_mean_average_errors(
                 prep_data, curr_feats + [feat], target_col,
-                model_class, model_params,
+                model_name,custom_objective,
                 n_runs
             )
 

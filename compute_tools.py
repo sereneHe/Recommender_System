@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 import numpy as np
@@ -124,8 +125,8 @@ from xgboost import XGBRegressor
 def compute_predictor_errors(prep_data, hei_feats, target_col,
                              do_print=True, stack_linear=False,
                              save_details=None,
-                             model_class=None,
-                             model_params=None,
+                             model_name=None,
+                             custom_objective=None,
                              compute_covs=True
                              ):
     assert not (stack_linear and (save_details is not None)), 'unsupported combination'
@@ -165,8 +166,45 @@ def compute_predictor_errors(prep_data, hei_feats, target_col,
             'n_jobs':-1               # use all available cores
         }
     """
-    assert model_class is not None
-    assert model_params is not None
+    # assert model_class is not None
+    # assert model_params is not None
+    assert model_name is not None
+    assert custom_objective is not None and custom_objective in ['lagrange', 'mse_builtin']
+    def custom_mse_obj(y_true, y_pred):
+        # L = 0.5 * (y_pred - y_true)^2
+        grad = y_pred - y_true # grad = dL/dy_pred = (y_pred - y_true)
+        hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
+        return grad, hess
+
+    if model_name == 'XGB':
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("xgb", XGBRegressor(
+                    n_estimators=10,
+                    max_depth=3,
+                    learning_rate=0.1,
+                    random_state=42,
+                    # tree_method="hist",
+                    base_score=y_train.mean(),
+                    objective=custom_mse_obj if custom_objective == 'lagrange' else "reg:squarederror" #custom_se #
+                )
+                 )
+            ]
+        }
+    #model_name = 'XGB'
+    elif model_name == 'REG':
+
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("linreg", LinearRegression())
+            ]
+        }
+        #model_name = 'REG'
+
 
     rf_model = model_class(**model_params)
 
