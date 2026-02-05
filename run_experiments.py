@@ -59,7 +59,7 @@ def start_experiment(cfg: DictConfig) -> None:
         for target_feat, (curr_feats, curr_train_errs, curr_test_errs) in result.items():
 
             target_feat = target_feat.replace(' ', '_').replace('(', '_').replace(')', '_').replace('/', '_')
-            mlflow.log_text("\n".join(curr_feats) + "\n", target_feat + "_vs_selected_feats_list.txt")
+            mlflow.log_text('['+", ".join(curr_feats) + "]", target_feat + "_vs_selected_feats_list.txt")
 
             train_err = curr_train_errs[-1]
             test_err = curr_test_errs[-1]

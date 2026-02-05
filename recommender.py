@@ -17,7 +17,7 @@ from recommender_utils import run_feature_selection
 
 
 def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs):
-
+    assert custom_objective in ['lagrange', 'mse_builtin']
     def custom_mse_obj(y_true, y_pred):
         # L = 0.5 * (y_pred - y_true)^2
         grad = y_pred - y_true # grad = dL/dy_pred = (y_pred - y_true)
@@ -101,7 +101,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
     # print(f'Running with seed: {seed}')
     # rng = np.random.default_rng(seed)
 
-    mlflow.log_text("\n".join(full_feats) + "\n", "full_feats_list.txt")
+    mlflow.log_text('['+", ".join(full_feats) + "]", "full_feats_list.txt")
 
     res_dict = {}
 
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     row_and_col_names = [x.strip() for x in s.strip("[]").split(",")]
 
     print(row_and_col_names)
-    result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names)
+    result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, 'XGB', 'lagrange', 5, 40)
 
     print(result)
 
