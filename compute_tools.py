@@ -169,12 +169,21 @@ def compute_predictor_errors(prep_data, hei_feats, target_col,
     # assert model_class is not None
     # assert model_params is not None
     assert model_name is not None
-    assert custom_objective is not None and custom_objective in ['lagrange', 'mse_builtin']
-    def custom_mse_obj(y_true, y_pred):
-        # L = 0.5 * (y_pred - y_true)^2
-        grad = y_pred - y_true # grad = dL/dy_pred = (y_pred - y_true)
-        hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
-        return grad, hess
+    assert custom_objective is not None and custom_objective in ['lagrange', 'mse_builtin', 'mse_custom']
+    if custom_objective == 'lagrange':
+        def custom_obj(y_true, y_pred):
+            # L = 0.5 * (y_pred - y_true)^2
+            grad = y_pred - y_true # grad = dL/dy_pred = (y_pred - y_true)
+            hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
+            return grad, hess
+    elif custom_objective == 'mse_custom':
+        def custom_obj(y_true, y_pred):
+            # L = 0.5 * (y_pred - y_true)^2
+            grad = y_pred - y_true  # grad = dL/dy_pred = (y_pred - y_true)
+            hess = np.ones_like(y_pred)  # hess = d^2L/dy_pred^2 = 1
+            return grad, hess
+    else:
+        custom_obj = 'reg:squarederror'
 
     if model_name == 'XGB':
         model_class = Pipeline
@@ -188,7 +197,7 @@ def compute_predictor_errors(prep_data, hei_feats, target_col,
                     random_state=42,
                     # tree_method="hist",
                     base_score=y_train.mean(),
-                    objective=custom_mse_obj if custom_objective == 'lagrange' else "reg:squarederror" #custom_se #
+                    objective=custom_obj
                 )
                  )
             ]

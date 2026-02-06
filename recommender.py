@@ -17,7 +17,7 @@ from recommender_utils import run_feature_selection
 
 
 def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs):
-    assert custom_objective in ['lagrange', 'mse_builtin']
+    assert custom_objective in ['lagrange', 'mse_custom','mse_builtin']
 
 
     model_factory = None
