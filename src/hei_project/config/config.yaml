@@ -1,0 +1,18 @@
+defaults:
+  - hp: basic
+  - _self_
+
+hydra:
+  job:
+    chdir: False
+
+paths:
+  root_dir: ${hydra:runtime.cwd}  # where you ran the command
+  data_dir: ${paths.root_dir}/data #
+  output_dir: ${hydra:runtime.output_dir}
+  model_checkpoints: ${paths.output_dir}/checkpoints
+  processed_dir: ${paths.data_dir}/processed
+  model_dir: ${paths.root_dir}/models
+  model_save_path: ${paths.model_dir}/model.pth
+  reports_dir: ${paths.root_dir}/reports
+  metrics_save_path: ${paths.reports_dir}/eval_metrics.pt

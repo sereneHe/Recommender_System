@@ -1,0 +1,5 @@
+[core]
+    no_scm = True
+    remote = gcs_remote
+['remote "gcs_remote"']
+    url = gs://serenehe_bucket_1/dvc

@@ -1,0 +1,39 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'Build container image'
+  args: [
+    'build',
+    '-t', 'europe-west1-docker.pkg.dev/dtumlops-484207/eval/streamlit_app:latest',
+    '-f', 'dockerfiles/streamlit_app.dockerfile',
+    '.'
+  ]
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'Push container image'
+  args: [
+    'push',
+    'europe-west1-docker.pkg.dev/dtumlops-484207/eval/streamlit_app:latest'
+  ]
+
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: 'Deploy to Cloud Run'
+  entrypoint: gcloud
+  args: [
+    'run',
+    'deploy',
+    'streamlit-app',
+    '--image', 'europe-west1-docker.pkg.dev/dtumlops-484207/eval/streamlit_app:latest',
+    '--region', 'europe-west1',
+    '--platform', 'managed',
+    '--port', '8501',                  # Streamlit default port
+    '--memory', '512Mi',               # Matches docker memory limits
+    '--cpu', '1',
+    '--timeout', '300s',
+    '--max-instances', '3',
+    '--cpu-boost',
+    '--set-env-vars', 'API_URL=https://api-934984265576.europe-west1.run.app',
+    '--service-account', '934984265576-compute@developer.gserviceaccount.com',
+    '--allow-unauthenticated'
+  ]
+
+options:
+  logging: CLOUD_LOGGING_ONLY

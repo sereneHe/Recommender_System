@@ -1,0 +1,23 @@
+# dvc.yaml
+stages:
+  preprocess:
+    cmd: uv run python -m hei_project.notebook_env prepare --data-dir datasets/raw --cache-dir data/cache --prep-out-path data/processed/prep_data.pkl
+    deps:
+      - src/
+      - datasets/raw/HEI/hei.pkl
+      - datasets/raw/UpdatedDataFromSara/blood_data.pkl
+      - datasets/raw/body_composition/body_comp.pkl
+      - datasets/raw/energy_expenditure/average_expenditure.pkl
+    outs:
+      - data/processed/prep_data.pkl
+
+  train:
+    cmd: uv run python -m hei_project.notebook_env train --processed-dir data/processed --model-dir models/recommender --report-dir reports
+    deps:
+      - src/
+      - data/processed/prep_data.pkl
+      - data/processed/food_feats.json
+      - data/processed/non_food_feats.json
+    outs:
+      - models/recommender/
+      - reports/recommender_training_results.json

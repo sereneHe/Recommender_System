@@ -1,0 +1,44 @@
+name: "Evaluate new best model"
+
+on:
+  push:
+    branches: [ master, main ]
+    # THIS IS THE TRIGGER: Only run if the model pointer changes
+    paths:
+      - 'dvc.lock'
+  workflow_dispatch:
+
+jobs:
+  evaluate-promoted-model:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Install dependencies
+      run: uv sync --dev --locked
+
+    - name: Authenticate with Google Cloud
+      env:
+        # Stored as GitHub secret variable
+        SA_KEY_JSON: ${{ secrets.GCP_SA_KEY }}
+      run: |
+        # Write the string into a physical file on the runner's disk
+        echo "$SA_KEY_JSON" > service_account_key.json
+        
+        # Set the environment variable so DVC/Python can find it
+        echo "GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/service_account_key.json" >> $GITHUB_ENV
+
+    - name: Pull from DVC
+      run: uv run dvc pull
+
+    - name: Run Evaluation
+      env:
+        WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+        WANDB_MODE: online
+      run: |
+        PKG=$(ls src | head -n 1)
+        uv run python src/$PKG/evaluate.py --model-path models/best_model.pt

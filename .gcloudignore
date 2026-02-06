@@ -1,0 +1,9 @@
+# .gcloudignore
+.gcloudignore
+.git
+.gitignore
+
+# Ensure these are NOT ignored so they get uploaded to Cloud Build
+!models/
+!models/model.pth
+!data/processed/
