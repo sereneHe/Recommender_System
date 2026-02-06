@@ -94,8 +94,8 @@ We use invoke as our primary project CLI to simplify complex commands and DVC to
 ### Setup
 1. Clone the repository:
     ```bash
-   git clone https://github.com/kadijairus/mlo_project.git
-   cd mlo_project
+   git clone https://github.com/sereneHe/Recommender_System.git
+   cd Recommender_System
    ```
 2. Install uv (optional, for running scripts):
    ```bash
