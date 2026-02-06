@@ -122,7 +122,7 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from xgboost import XGBRegressor
 
 
-def compute_predictor_errors(prep_data, hei_feats, target_col,
+def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_col_names,
                              do_print=True, stack_linear=False,
                              save_details=None,
                              model_name=None,
@@ -130,6 +130,9 @@ def compute_predictor_errors(prep_data, hei_feats, target_col,
                              compute_covs=True
                              ):
     assert not (stack_linear and (save_details is not None)), 'unsupported combination'
+
+    # data_cols = prep_data.columns
+    # print(len(data_cols))
 
     reg_dat = prep_data[hei_feats + [target_col]]
     reg_dat = reg_dat.dropna()
@@ -170,10 +173,26 @@ def compute_predictor_errors(prep_data, hei_feats, target_col,
     # assert model_params is not None
     assert model_name is not None
     assert custom_objective is not None and custom_objective in ['lagrange', 'mse_builtin', 'mse_custom']
+    number_of_features, number_of_samples = X_train.shape
+
+    row_and_col_names_indices = {name: i for i, name in enumerate(row_and_col_names)}
+    # extra_cols = row_and_col_names_indices.keys() - data_cols
+    # print(extra_cols)
+    row_and_col_names_indices['gender_numeric'] = 0  # TODO: remove
+    idx_list = [row_and_col_names_indices[f] for f in hei_feats]
+
+
+    predict_idx = row_and_col_names_indices[target_col]
+    w_est_y = w_est[:, predict_idx]
+    w_est_y = w_est_y[idx_list]
+
+    #w_est_y = np.zeros((number_of_features,))
+    lambda_features = np.zeros_like(w_est_y)
+    lambda_predict = 0.0
     if custom_objective == 'lagrange':
         def custom_obj(y_true, y_pred):
             # L = 0.5 * (y_pred - y_true)^2
-            grad = y_pred - y_true # grad = dL/dy_pred = (y_pred - y_true)
+            grad = y_pred - y_true + np.dot(lambda_features, w_est_y) + lambda_predict # grad = dL/dy_pred = (y_pred - y_true)
             hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
             return grad, hess
     elif custom_objective == 'mse_custom':

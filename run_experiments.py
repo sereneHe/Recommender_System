@@ -1,3 +1,4 @@
+import ast
 import time
 import zipfile
 from os.path import join
@@ -45,10 +46,12 @@ def start_experiment(cfg: DictConfig) -> None:
         mlflow.log_artifact("./data/W_est.csv.zip")
         s = Path('./data/intra_nodes.txt').read_text(encoding="utf-8").strip()
         mlflow.log_text(s, 'intra_nodes.txt')
-        row_and_col_names = [x.strip() for x in s.strip("[]").split(",")]
+        row_and_col_names = ast.literal_eval(s) #[x.strip() for x in s.strip("[]").split(",")]
 
         print(row_and_col_names)
         start_time = time.time()
+
+
 
         result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs)
 

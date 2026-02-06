@@ -3,13 +3,13 @@ import numpy as np
 from compute_tools import compute_predictor_errors
 
 
-def get_mean_average_errors(prep_data, run_feats, target_col,
+def get_mean_average_errors(prep_data, run_feats, target_col, w_est, row_and_col_names,
                             model_name, custom_objective,
                             n_runs):
     run_res = []
     for i in range(n_runs):
         run_res.append(
-            compute_predictor_errors(prep_data, run_feats, target_col,
+            compute_predictor_errors(prep_data, run_feats, target_col, w_est, row_and_col_names,
                                      model_name=model_name,
                                      custom_objective=custom_objective,
                                      do_print=False, stack_linear=False,
@@ -28,6 +28,7 @@ from time import time
 
 def run_feature_selection(prep_data, model_name,custom_objective,
                           target_col,
+                          w_est, row_and_col_names,
                           n_runs, n_features,
                           full_feats,
                           model_factory=None
@@ -54,6 +55,7 @@ def run_feature_selection(prep_data, model_name,custom_objective,
         for feat in candidate_feats:
             train_ratio_mean, test_ratio_mean = get_mean_average_errors(
                 prep_data, curr_feats + [feat], target_col,
+                w_est, row_and_col_names,
                 model_name,custom_objective,
                 n_runs
             )

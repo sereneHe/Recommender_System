@@ -80,6 +80,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
             model_name,
             custom_objective,
             target_col,
+            w_est, row_and_col_names,
             n_runs, N_SELECT_FEATURES,
             full_feats,
             model_factory=model_factory
