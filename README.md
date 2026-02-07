@@ -1,5 +1,10 @@
 # Machine Learning Operations in Breast Cancer Aspirate Malignancy Classification
 
+## Quick Docs
+
+- App users (non-coding): `README_APP.md`
+- Developers (open-source/code): `README_DEV.md`
+
 This is the project of group 5 in the course "Machine Learning Operations" at DTU.
 
 # Project Description
