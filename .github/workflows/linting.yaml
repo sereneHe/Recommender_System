@@ -1,0 +1,38 @@
+name: "Run linting"
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true # Cancel previous runs on new push
+
+jobs:
+  lint: # Job name
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Setup uv (with cache)
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: 3.12
+        enable-cache: true # Enable caching for faster installs
+
+    - name: Install dependencies
+      run: |
+        uv sync --dev --locked
+
+    - name: Ruff check
+      run: uv run ruff check .
+
+    - name: Ruff format
+      run: uv run ruff format .
+
+    - name: Mypy (type check)
+      run: uv run mypy .

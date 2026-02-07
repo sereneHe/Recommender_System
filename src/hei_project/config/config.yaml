@@ -1,0 +1,20 @@
+paths:
+  assets_dir: ../../data
+
+assets:
+  w_est_zip: W_est.csv.zip
+  w_est_inner_csv: W_est.csv
+  intra_nodes_txt: intra_nodes.txt
+
+solver:
+  model_name: XGB
+  custom_objective: lagrange
+  n_select_features: 5
+  n_runs: 40
+
+targets:
+  columns: ["GLU (mg/dL)"]
+
+mlflow:
+  tracking_uri: null
+  experiment_name: codiet_recommender

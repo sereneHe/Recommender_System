@@ -1,0 +1,21 @@
+
+hydra:
+  launcher:
+    n_jobs: 1
+    prefer: processes
+#    prefer: processes # use processes instead of threads
+#    backend: multiprocessing # use multiprocessing backend instead of loky
+  sweeper:
+    # max_batch_size: 500 # - only for cluster
+    params:
+
+experiment: CODIET_RECOMMENDER
+defaults:
+  - solver: mark
+  - problem: codiet
+  - override hydra/launcher: joblib
+  - _self_
+
+
+
+

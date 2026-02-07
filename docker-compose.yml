@@ -1,0 +1,32 @@
+services:
+  # The Backend API (FastAPI/Uvicorn)
+  api:
+    build:
+      context: .
+      dockerfile: dockerfiles/api.dockerfile # Ensure you have a Dockerfile for the API
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - IS_DOCKER=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s   # Wait 30s between checks
+      timeout: 10s   # Give the curl command 10s to respond
+      retries: 20    # Try 20 times before giving up
+      start_period: 300s # DON'T check at all for the first 300s (Model loading time)
+
+  # The Frontend UI (Streamlit)
+  app:
+    build:
+      context: .
+      dockerfile: dockerfiles/streamlit_app.dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - PORT=8501
+      - API_URL=http://api:8000 # Point to the API service
+      - IS_DOCKER=1
+    depends_on:
+      api:
+        condition: service_healthy # Wait for API to be ready before starting UI

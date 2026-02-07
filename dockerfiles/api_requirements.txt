@@ -1,0 +1,5 @@
+loguru>=0.7.3
+types-requests
+pandas-stubs>=2.3.3.260113
+fastapi>=0.115.6
+torch==2.6.0

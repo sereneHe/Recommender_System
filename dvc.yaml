@@ -1,0 +1,18 @@
+# dvc.yaml
+stages:
+  preprocess:
+    cmd: uv run python src/*/data.py
+    deps:
+      - src/
+      - data/raw/bcw.csv
+    outs:
+      - data/processed/
+
+  train:
+    cmd: uv run python src/*/train.py
+    deps:
+      - src/
+      - data/processed/
+    outs:
+      - models/best_model.pt
+      - models/last_model.pt
