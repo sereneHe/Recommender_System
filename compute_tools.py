@@ -176,9 +176,7 @@ def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_co
     number_of_features, number_of_samples = X_train.shape
 
     row_and_col_names_indices = {name: i for i, name in enumerate(row_and_col_names)}
-    # extra_cols = row_and_col_names_indices.keys() - data_cols
-    # print(extra_cols)
-    row_and_col_names_indices['gender_numeric'] = 0  # TODO: remove
+
     idx_list = [row_and_col_names_indices[f] for f in hei_feats]
 
 
