@@ -2,6 +2,7 @@ from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+import xgboost as xgb
 from sklearn.model_selection import train_test_split
 import numpy as np
 import pandas as pd
@@ -185,40 +186,86 @@ def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_co
     w_est_y = w_est_y[idx_list]
 
     #w_est_y = np.zeros((number_of_features,))
-    lambda_features = np.zeros_like(w_est_y)
-    lambda_predict = 0.0
-    if custom_objective == 'lagrange':
-        def custom_obj(y_true, y_pred):
-            # L = 0.5 * (y_pred - y_true)^2
-            grad = y_pred - y_true + np.dot(lambda_features, w_est_y) + lambda_predict # grad = dL/dy_pred = (y_pred - y_true)
-            hess = np.ones_like(y_pred) # hess = d^2L/dy_pred^2 = 1
-            return grad, hess
-    elif custom_objective == 'mse_custom':
-        def custom_obj(y_true, y_pred):
-            # L = 0.5 * (y_pred - y_true)^2
-            grad = y_pred - y_true  # grad = dL/dy_pred = (y_pred - y_true)
-            hess = np.ones_like(y_pred)  # hess = d^2L/dy_pred^2 = 1
-            return grad, hess
-    else:
-        custom_obj = 'reg:squarederror'
+
 
     if model_name == 'XGB':
-        model_class = Pipeline
-        model_params = {
-            'steps': [
-                ("scale", StandardScaler()),
-                ("xgb", XGBRegressor(
-                    n_estimators=10,
-                    max_depth=3,
-                    learning_rate=0.1,
-                    random_state=42,
-                    # tree_method="hist",
-                    base_score=y_train.mean(),
-                    objective=custom_obj
-                )
-                 )
-            ]
-        }
+        lambda_features = np.zeros_like(w_est_y)
+        lambda_predict = 0.0
+        if custom_objective in ['lagrange', 'mse_custom']:
+            if custom_objective == 'lagrange':
+                def custom_obj(y_true, y_pred):
+                    # L = 0.5 * (y_pred - y_true)^2
+                    grad = y_pred - y_true + np.dot(lambda_features,
+                                                    w_est_y) + lambda_predict  # grad = dL/dy_pred = (y_pred - y_true)
+                    hess = np.ones_like(y_pred)  # hess = d^2L/dy_pred^2 = 1
+                    return grad, hess
+            else:
+                def custom_obj(y_true, y_pred):
+                    # L = 0.5 * (y_pred - y_true)^2
+                    grad = y_pred - y_true  # grad = dL/dy_pred = (y_pred - y_true)
+                    hess = np.ones_like(y_pred)  # hess = d^2L/dy_pred^2 = 1
+                    return grad, hess
+
+            scaler = StandardScaler()
+            X_train_s = scaler.fit_transform(X_train)
+            X_test_s = scaler.transform(X_test)
+            dtrain = xgb.DMatrix(X_train_s, label=y_train)
+            dtest = xgb.DMatrix(X_test_s, label=y_test)
+
+            def obj_for_train(preds, dtrain):
+                y_true = dtrain.get_label()
+                grad, hess = custom_obj(y_true, preds)  # uses your existing custom_obj
+                return grad, hess
+
+            params = {
+                "max_depth": 3,
+                "eta": 0.1,  # learning_rate
+                "seed": 42,  # random_state
+                "base_score": float(np.mean(y_train)),
+                # "tree_method": "hist",           # uncomment if you want
+            }
+
+            num_boost_round = 10
+
+            booster = xgb.train(
+                params=params,
+                dtrain=dtrain,
+                num_boost_round=num_boost_round,
+                obj=obj_for_train,
+                evals=[(dtrain, "train"), (dtest, "test")],  # optional
+                verbose_eval=False
+            )
+
+            # --- 6) Predict ---
+            y_test_pred = booster.predict(dtest)
+            y_train_pred = booster.predict(dtrain)
+
+        else:
+            custom_obj = 'reg:squarederror'
+
+
+            model_class = Pipeline
+            model_params = {
+                'steps': [
+                    ("scale", StandardScaler()),
+                    ("xgb", XGBRegressor(
+                        n_estimators=10,
+                        max_depth=3,
+                        learning_rate=0.1,
+                        random_state=42,
+                        # tree_method="hist",
+                        base_score=y_train.mean(),
+                        objective=custom_obj
+                    )
+                     )
+                ]
+            }
+            rf_model = model_class(**model_params)
+
+            # Train the model
+            rf_model.fit(X_train, y_train)
+            y_train_pred = rf_model.predict(X_train)
+            y_test_pred = rf_model.predict(X_test)
     #model_name = 'XGB'
     elif model_name == 'REG':
 
@@ -230,14 +277,14 @@ def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_co
             ]
         }
         #model_name = 'REG'
+        rf_model = model_class(**model_params)
+
+        # Train the model
+        rf_model.fit(X_train, y_train)
+        y_train_pred = rf_model.predict(X_train)
+        y_test_pred = rf_model.predict(X_test)
 
 
-    rf_model = model_class(**model_params)
-
-    # Train the model
-    rf_model.fit(X_train, y_train)
-
-    y_train_pred = rf_model.predict(X_train)
 
     if stack_linear:
         lr_model = LinearRegression()
@@ -249,7 +296,7 @@ def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_co
 
     train_ratio = train_mse / train_bench
 
-    y_test_pred = rf_model.predict(X_test)
+    # y_test_pred = rf_model.predict(X_test)
     if stack_linear:
         y_test_pred = lr_model.predict(y_test_pred[:, None])
 
