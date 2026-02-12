@@ -2,4 +2,4 @@ name: mark
 model_name: XGB
 custom_objective: lagrange #mse_builtin #mse_custom
 N_SELECT_FEATURES: 5
-n_runs: 40
+n_runs: 5

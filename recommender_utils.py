@@ -1,6 +1,9 @@
 import numpy as np
+from sklearn.feature_selection import SequentialFeatureSelector
+from sklearn.model_selection import cross_validate
 
 from compute_tools import compute_predictor_errors
+from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, compute_predictor_errors_scikit
 
 
 def get_mean_average_errors(prep_data, run_feats, target_col, w_est, row_and_col_names,
@@ -91,3 +94,55 @@ def run_feature_selection(prep_data, model_name,custom_objective,
         print(f'   Round completed in {(ctime - start_time) / 60:.2f} min.')
 
     return curr_feats, curr_train_errs, curr_test_errs
+
+
+def run_feature_selection_scikit(prep_data, model_name, custom_objective,
+                          target_col,
+                          w_est, row_and_col_names,
+                          n_runs, n_features,
+                          full_feats, model_factory=None
+                          ):
+    model = None
+    if model_name == "XGB":
+        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data)
+    elif model_name == "REG":
+        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data)
+    if model is None:
+        raise ValueError("Model can be only XGB or REG.")
+
+    sfs = SequentialFeatureSelector(
+        model,
+        direction="forward",
+        scoring=compute_predictor_errors_scikit,
+        cv=n_runs,
+        n_features_to_select=n_features
+    )
+
+    assert all(isinstance(col, str) for col in prep_data.columns)
+
+    y = prep_data[target_col]
+
+    #TODO this deletes only 30 columns out of 508, so I will do this so that scikit feature selection works (no nas)
+    prep_data = prep_data[full_feats]
+    prep_data = prep_data.dropna(axis=1)
+    X = prep_data.drop(target_col, axis=1) if target_col in prep_data.columns else prep_data
+
+    sfs.fit(X, y)
+
+    # here are the selected features
+    best_features = X.columns[sfs.get_support()]
+    selected_indices = sfs.get_support(indices=True)
+
+    print(f"Best features {best_features}, {selected_indices}")
+
+    X_selected = X.iloc[:, selected_indices]
+    X_selected = X_selected.to_numpy() # CV did not work with pandas data frame, IDKW
+
+
+    results = cross_validate(model, X_selected, y,
+        cv=10,
+        scoring=compute_predictor_errors_scikit,
+        return_train_score=True
+    )
+
+    return best_features, [results["train_score"].mean()], [results["test_score"].mean()]

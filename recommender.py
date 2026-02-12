@@ -12,8 +12,7 @@ import pickle as pkl
 from xgboost import XGBRegressor
 
 from data_helper import load_all_data
-from recommender_utils import run_feature_selection
-
+from recommender_utils import run_feature_selection, run_feature_selection_scikit
 
 
 def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs):
@@ -75,7 +74,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
     res_dict = {}
 
     for target_col in target_columns:
-        curr_feats, curr_train_errs, curr_test_errs = run_feature_selection(
+        curr_feats, curr_train_errs, curr_test_errs = run_feature_selection_scikit(
             prep_data,
             model_name,
             custom_objective,
