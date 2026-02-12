@@ -74,7 +74,7 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
             idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
             predict_idx = row_and_col_names_indices[self.target_col]
             w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
-            self._rf_model, lam = fit_aug_lagrangian_W_constraint(X, y, w_est, num_boost_round=10)
+            self._rf_model_, lam = fit_aug_lagrangian_W_constraint(X, y, w_est, num_boost_round=10)
         else:
             model_class = Pipeline
             model_params = {
@@ -93,13 +93,13 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                 ]
             }
             rf_model = model_class(**model_params)
-            self._rf_model = rf_model.fit(X, y)
+            self._rf_model_ = rf_model.fit(X, y)
             return self
 
     def predict(self, X):
         if self.custom_objective in ['lagrange', 'mse_custom']:
             X = self.scaler_.transform(X)
-            return self._rf_model.predict(xgb.DMatrix(X))
+            return self._rf_model_.predict(xgb.DMatrix(X))
         else:
             return super().predict(X)
 
@@ -119,7 +119,7 @@ class REGRecommenderPredictor(RecommenderBaseEstimator):
         rf_model = model_class(**model_params)
 
         # Train the model
-        self._rf_model = rf_model.fit(X, y)
+        self._rf_model_ = rf_model.fit(X, y)
         return self
 
 
