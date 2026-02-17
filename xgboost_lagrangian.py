@@ -1,4 +1,5 @@
 import numpy as np
+np.seterr(invalid="raise")
 import xgboost as xgb
 
 def fit_aug_lagrangian_W_constraint(
@@ -23,6 +24,9 @@ def fit_aug_lagrangian_W_constraint(
     W = np.asarray(W)
 
     n, d = X.shape
+    print("n:", n)
+    print("d:", d)
+    print("W:", W.shape)
     assert W.shape == (d + 1, d + 1), "W must be (d+1)x(d+1) where d = X.shape[1]."
 
     base_score = float(np.average(y, weights=sample_weight)) if sample_weight is not None else float(y.mean())
@@ -57,6 +61,8 @@ def fit_aug_lagrangian_W_constraint(
     booster = None
 
     for k in range(n_outer):
+        if booster is not None and "base_score" in params:
+            del params["base_score"]
         # capture lam, rho in closure
         def obj(preds, dtrain):
             y_true = dtrain.get_label()
@@ -67,10 +73,15 @@ def fit_aug_lagrangian_W_constraint(
             hess = np.ones_like(preds)
 
             muY = preds.mean()
-            g = g0 + muY * v
-
+            try:
+                g_ = g0 + muY * v
+            except FloatingPointError as e:
+                print("Invalid multiply detected")
+                print("muY:", muY)
+                print("v:", v)
+                raise
             # scalar that multiplies d(muY)/d(pred_i)=1/n
-            alpha = float(v @ lam + rho * (v @ g))
+            alpha = float(v @ lam + rho * (v @ g_))
 
             grad = grad + alpha / nloc
 

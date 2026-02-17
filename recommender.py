@@ -15,7 +15,7 @@ from data_helper import load_all_data
 from recommender_utils import run_feature_selection, run_feature_selection_scikit
 
 
-def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs):
+def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs, solver_cfg):
     assert custom_objective in ['lagrange', 'mse_custom','mse_builtin']
 
 
@@ -82,7 +82,9 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
             w_est, row_and_col_names,
             n_runs, N_SELECT_FEATURES,
             full_feats,
-            model_factory=model_factory
+            solver_cfg=solver_cfg,
+            model_factory=model_factory,
+
         )
 
         res_dict[target_col] = (curr_feats, curr_train_errs, curr_test_errs)

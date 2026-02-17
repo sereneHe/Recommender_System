@@ -100,13 +100,13 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
                           target_col,
                           w_est, row_and_col_names,
                           n_runs, n_features,
-                          full_feats, model_factory=None
+                          full_feats, solver_cfg, model_factory=None
                           ):
     model = None
     if model_name == "XGB":
-        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data)
+        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
     elif model_name == "REG":
-        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data)
+        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
     if model is None:
         raise ValueError("Model can be only XGB or REG.")
 

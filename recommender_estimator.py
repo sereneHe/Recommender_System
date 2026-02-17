@@ -9,7 +9,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 
-
+import solve_milp
 from compute_tools import percentile_mask
 from xgboost_lagrangian import fit_aug_lagrangian_W_constraint
 from xgboost import XGBRegressor
@@ -23,7 +23,7 @@ def compute_predictor_errors_scikit(estimator, X, y):
 
 
 class RecommenderBaseEstimator(BaseEstimator):
-    def __init__(self, w_est, target_col, row_and_col_names, custom_objective, prep_data):
+    def __init__(self, w_est, target_col, row_and_col_names, custom_objective, prep_data, cfg):
         if custom_objective is None or custom_objective not in ['lagrange', 'mse_builtin', 'mse_custom']:
             raise ValueError("Custom objective can be only lagrange, mse_builtin, mse_custom")
 
@@ -34,6 +34,7 @@ class RecommenderBaseEstimator(BaseEstimator):
         self.prep_data = prep_data
         self._rf_model_ = None
         self.feature_names_in_ = None
+        self.cfg = cfg
 
     def predict(self, X):
         return self._rf_model_.predict(X)
@@ -70,10 +71,35 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
             self.scaler_ = StandardScaler()
             self.scaler_.fit_transform(X)
 
-            row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-            idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
-            predict_idx = row_and_col_names_indices[self.target_col]
-            w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+            if self.cfg.recalculate_dag:
+                d = X.shape[1] + 1 # adding one for y
+                X_y = np.column_stack((X, y.to_numpy()))
+                if d <= 2:
+                    w_est = np.zeros((d,d))
+                else:
+                    print("max X", X.max(), "min X", X.min())
+                    tabu_edges = None #TODO: load them
+                    w_est, _, _, _, _ = solve_milp.solve(X_y, self.cfg, self.cfg.nonzero_threshold,
+                                                                            Y=[],
+                                                                            B_ref=np.zeros((d,d)),
+                                                                            tabu_edges=tabu_edges )
+                    print(w_est)
+
+                    row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
+                    idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+                    predict_idx = row_and_col_names_indices[self.target_col]
+                    w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+                    print(w_est2)
+
+            else:
+                row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
+                idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+                predict_idx = row_and_col_names_indices[self.target_col]
+                w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+
+            # call exdbn
+
+
             self._rf_model_, lam = fit_aug_lagrangian_W_constraint(X, y, w_est, num_boost_round=10)
         else:
             model_class = Pipeline
