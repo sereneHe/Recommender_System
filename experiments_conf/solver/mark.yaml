@@ -9,15 +9,17 @@ recalculate_dag: true
 loss_type: l2
 reg_type: l2
 a_reg_type: l1
-lambda1: 1.0
-lambda2: 1.0
+lambda1: 000.1
+lambda2: 000.1
 nonzero_threshold: 0.001
 constraints_mode: weights
 callback_mode: all_cycles # shortest_cycle
 robust: false
 tabu_edges: false
-weights_bound: 100.0
+weights_bound: 1.0
 time_limit: 1800
 target_mip_gap: 0.0001
 
 
+data_path: '../codiet_data/'
+knowledge_graph_filename: 'knowledge_graph_intersection.graphml'

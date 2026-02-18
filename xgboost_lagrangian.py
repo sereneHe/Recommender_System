@@ -24,9 +24,9 @@ def fit_aug_lagrangian_W_constraint(
     W = np.asarray(W)
 
     n, d = X.shape
-    print("n:", n)
-    print("d:", d)
-    print("W:", W.shape)
+    # print("n:", n)
+    # print("d:", d)
+    # print("W:", W.shape)
     assert W.shape == (d + 1, d + 1), "W must be (d+1)x(d+1) where d = X.shape[1]."
 
     base_score = float(np.average(y, weights=sample_weight)) if sample_weight is not None else float(y.mean())

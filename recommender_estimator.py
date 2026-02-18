@@ -1,6 +1,9 @@
+import networkx as nx
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+
+from os.path import join
 
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
@@ -74,22 +77,33 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
             if self.cfg.recalculate_dag:
                 d = X.shape[1] + 1 # adding one for y
                 X_y = np.column_stack((X, y.to_numpy()))
-                if d <= 2:
-                    w_est = np.zeros((d,d))
-                else:
-                    print("max X", X.max(), "min X", X.min())
-                    tabu_edges = None #TODO: load them
-                    w_est, _, _, _, _ = solve_milp.solve(X_y, self.cfg, self.cfg.nonzero_threshold,
-                                                                            Y=[],
-                                                                            B_ref=np.zeros((d,d)),
-                                                                            tabu_edges=tabu_edges )
-                    print(w_est)
+                # if d <= 2:
+                #     w_est = np.zeros((d,d))
+                # else:
+                print("max X", X.max(), "min X", X.min())
+                current_column_names = self.get_current_column_names(X)
+                G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
+                print(G.nodes())
+                print(current_column_names + [self.target_col])
+                H = G.subgraph(current_column_names + [self.target_col]).copy()
+                if H.number_of_nodes() > 0:
+                    print('not emty')
+                H = nx.complement(H)
+                col_to_idx = {col: idx for idx, col in enumerate(current_column_names + [self.target_col])}
+                tabu_edges = list((col_to_idx[s],col_to_idx[e]) for (s,e) in H.edges())
+                if tabu_edges:
+                    print(tabu_edges)
+                w_est, _, _, _, _ = solve_milp.solve(X_y, self.cfg, self.cfg.nonzero_threshold,
+                                                                        Y=[],
+                                                                        B_ref=np.zeros((d,d)),
+                                                                        tabu_edges=tabu_edges )
+                #print(w_est)
 
-                    row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-                    idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
-                    predict_idx = row_and_col_names_indices[self.target_col]
-                    w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
-                    print(w_est2)
+                row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
+                idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+                predict_idx = row_and_col_names_indices[self.target_col]
+                w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+                #print(w_est2)
 
             else:
                 row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}

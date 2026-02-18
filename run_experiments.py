@@ -5,6 +5,7 @@ from os.path import join
 import logging
 from pathlib import Path
 
+import networkx as nx
 import numpy as np
 from hydra.core.hydra_config import HydraConfig
 
@@ -51,7 +52,13 @@ def start_experiment(cfg: DictConfig) -> None:
         print(row_and_col_names)
         start_time = time.time()
 
-
+        # current_column_names = food_feats + non_food_feats
+        # G = nx.read_graphml(join(cfg.solver.data_path, cfg.solver.knowledge_graph_filename))
+        # print(G.nodes())
+        # print(current_column_names)
+        # H = G.subgraph(current_column_names ).copy()
+        # H = nx.complement(H)
+        # print(H.nodes())
 
         result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
 

@@ -1,7 +1,9 @@
 import mlflow
+import networkx as nx
 import numpy as np
 import zipfile
 from pathlib import Path
+from os.path import join
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -70,6 +72,17 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
     # rng = np.random.default_rng(seed)
 
     mlflow.log_text('['+", ".join(full_feats) + "]", "full_feats_list.txt")
+
+    current_column_names = list(prep_data.columns) # food_feats + non_food_feats
+    current_column_names2 = food_feats + non_food_feats
+    G = nx.read_graphml(join(solver_cfg.data_path, solver_cfg.knowledge_graph_filename))
+    print(G.nodes())
+    print(current_column_names)
+    H = G.subgraph(current_column_names ).copy()
+    if H.number_of_nodes() > 0:
+        print('not emty')
+    H = nx.complement(H)
+    print(H.nodes())
 
     res_dict = {}
 
