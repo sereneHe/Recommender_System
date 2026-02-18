@@ -60,7 +60,7 @@ def start_experiment(cfg: DictConfig) -> None:
         # H = nx.complement(H)
         # print(H.nodes())
 
-        result = run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
+        result = run_recommender(food_feats, non_food_feats, prep_data, cfg.problem.target, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
 
         print(result)
 

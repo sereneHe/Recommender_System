@@ -17,7 +17,7 @@ from data_helper import load_all_data
 from recommender_utils import run_feature_selection, run_feature_selection_scikit
 
 
-def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs, solver_cfg):
+def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs, solver_cfg):
     assert custom_objective in ['lagrange', 'mse_custom','mse_builtin']
 
 
@@ -60,7 +60,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
                       'Systolic Blood Pressure (mm Hg)', 'Diastolic Blood Pressure (mm Hg)',
                       'CRP (mg/dL)', 'whtr(waist-height_ratio)']
     """
-    target_columns = ['GLU (mg/dL)']
+    target_columns = [target] # ['GLU (mg/dL)']
     # target_columns = ['whtr(waist-height_ratio)']
 
 

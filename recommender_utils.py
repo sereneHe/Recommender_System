@@ -3,6 +3,7 @@ from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.model_selection import cross_validate
 
 from compute_tools import compute_predictor_errors
+from recomender_humancompatible import HCRecommenderPredictor
 from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, compute_predictor_errors_scikit
 
 
@@ -107,6 +108,8 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
     elif model_name == "REG":
         model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
+    elif model_name == "HC":
+        model = HCRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
     if model is None:
         raise ValueError("Model can be only XGB or REG.")
 
