@@ -1,9 +1,8 @@
 import numpy as np
-import pandas as pd
 import xgboost as xgb
+import logging
 
 from sklearn.base import BaseEstimator
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -47,19 +46,24 @@ class RecommenderBaseEstimator(BaseEstimator):
 
 
 class XGBRecommenderPredictor(RecommenderBaseEstimator):
-    def get_current_column_names(self, X):
+    def get_current_column_names(self, X, debug=False):
         # SFS posílá X jako numpy array s vyházenými řádky a sloupci
         current_feature_names = []
 
         for i in range(X.shape[1]):
             col_data = X[:, i]
+            ati = set()
             for col_name in self.prep_data.columns:
                 if col_name in current_feature_names:
                     continue
                 it = iter(self.prep_data[col_name])
                 if all(any(a == b for a in it) for b in col_data):
                     current_feature_names.append(col_name)
-                    break
+                    if not debug:
+                        break
+                    ati.add(col_name)
+                    if(len(ati) > 1):
+                        logging.warning(f"Multiple features mapping to a column: {ati}")
 
         return current_feature_names
 

@@ -1,4 +1,5 @@
 import numpy as np
+import logging
 from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.model_selection import cross_validate
 
@@ -102,11 +103,17 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
                           n_runs, n_features,
                           full_feats, model_factory=None
                           ):
+    logging.info(f"w_est shape {w_est.shape}")
+    logging.info(f"target_col {target_col}")
+    logging.info(f"row_and_col_names {len(row_and_col_names)}")
+    logging.info(f"prep_data.shape {prep_data.shape}")
+    logging.info(f"row_and_col_names {row_and_col_names}")
+
     model = None
     if model_name == "XGB":
-        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data)
+        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names])
     elif model_name == "REG":
-        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data)
+        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names])
     if model is None:
         raise ValueError("Model can be only XGB or REG.")
 
@@ -127,13 +134,15 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     prep_data = prep_data.dropna(axis=1)
     X = prep_data.drop(target_col, axis=1) if target_col in prep_data.columns else prep_data
 
+    logging.info(f"Testing on columns {len(X.columns)}: {X.columns}")
+
     sfs.fit(X, y)
 
     # here are the selected features
     best_features = X.columns[sfs.get_support()]
     selected_indices = sfs.get_support(indices=True)
 
-    print(f"Best features {best_features}, {selected_indices}")
+    logging.info(f"Best features {best_features}, {selected_indices}")
 
     X_selected = X.iloc[:, selected_indices]
     X_selected = X_selected.to_numpy() # CV did not work with pandas data frame, IDKW
