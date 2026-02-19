@@ -51,30 +51,22 @@ def start_experiment(cfg: DictConfig) -> None:
 
         print(row_and_col_names)
         start_time = time.time()
+        target_feat = cfg.problem.target
+        curr_feats, curr_train_err, curr_test_err = run_recommender(food_feats, non_food_feats, prep_data, target_feat, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
 
-        # current_column_names = food_feats + non_food_feats
-        # G = nx.read_graphml(join(cfg.solver.data_path, cfg.solver.knowledge_graph_filename))
-        # print(G.nodes())
-        # print(current_column_names)
-        # H = G.subgraph(current_column_names ).copy()
-        # H = nx.complement(H)
-        # print(H.nodes())
+        # print(result)
+        #
+        # assert len(result) == 1
 
-        result = run_recommender(food_feats, non_food_feats, prep_data, cfg.problem.target, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
+        #for target_feat, (curr_feats, curr_train_errs, curr_test_errs) in result.items():
 
-        print(result)
+        target_feat = target_feat.replace(' ', '_').replace('(', '_').replace(')', '_').replace('/', '_')
+        mlflow.log_text('['+", ".join(curr_feats) + "]", "selected_features.txt")
 
-        assert len(result) == 1
-
-        for target_feat, (curr_feats, curr_train_errs, curr_test_errs) in result.items():
-
-            target_feat = target_feat.replace(' ', '_').replace('(', '_').replace(')', '_').replace('/', '_')
-            mlflow.log_text('['+", ".join(curr_feats) + "]", target_feat + "_vs_selected_feats_list.txt")
-
-            train_err = curr_train_errs[-1]
-            test_err = curr_test_errs[-1]
-            log_metric(f'{target_feat}_train_err', train_err)
-            log_metric(f'{target_feat}_test_err', test_err)
+        # train_err = curr_train_errs[-1]
+        # test_err = curr_test_errs[-1]
+        log_metric(f'train_error', curr_train_err)
+        log_metric(f'test_err', curr_test_err)
 
 
         solving_duration = time.time() - start_time

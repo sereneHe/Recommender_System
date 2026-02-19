@@ -60,7 +60,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_an
                       'Systolic Blood Pressure (mm Hg)', 'Diastolic Blood Pressure (mm Hg)',
                       'CRP (mg/dL)', 'whtr(waist-height_ratio)']
     """
-    target_columns = [target] # ['GLU (mg/dL)']
+    #target_columns = [target] # ['GLU (mg/dL)']
     # target_columns = ['whtr(waist-height_ratio)']
 
 
@@ -71,39 +71,41 @@ def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_an
     # print(f'Running with seed: {seed}')
     # rng = np.random.default_rng(seed)
 
-    mlflow.log_text('['+", ".join(full_feats) + "]", "full_feats_list.txt")
+    #mlflow.log_text('['+", ".join(full_feats) + "]", "full_feats_list.txt")
 
     current_column_names = list(prep_data.columns) # food_feats + non_food_feats
-    current_column_names2 = food_feats + non_food_feats
-    current_column_names = row_and_col_names
-    G = nx.read_graphml(join(solver_cfg.data_path, solver_cfg.knowledge_graph_filename))
-    print(G.nodes())
-    print(current_column_names)
-    H = G.subgraph(current_column_names ).copy()
-    if H.number_of_nodes() > 0:
-        print('not emty')
-    H = nx.complement(H)
-    print(H.nodes())
+    mlflow.log_text('['+", ".join(current_column_names) + "]", "full_feats_list.txt")
 
-    res_dict = {}
+    # current_column_names2 = food_feats + non_food_feats
+    # current_column_names = row_and_col_names
+    # G = nx.read_graphml(join(solver_cfg.data_path, solver_cfg.knowledge_graph_filename))
+    # print(G.nodes())
+    # print(current_column_names)
+    # H = G.subgraph(current_column_names ).copy()
+    # if H.number_of_nodes() > 0:
+    #     print('not emty')
+    # H = nx.complement(H)
+    # print(H.nodes())
+    #
+    # res_dict = {}
 
-    for target_col in target_columns:
-        curr_feats, curr_train_errs, curr_test_errs = run_feature_selection_scikit(
-            prep_data,
-            model_name,
-            custom_objective,
-            target_col,
-            w_est, row_and_col_names,
-            n_runs, N_SELECT_FEATURES,
-            full_feats,
-            solver_cfg=solver_cfg,
-            model_factory=model_factory,
+    #for target_col in target_columns:
+    curr_feats, curr_train_errs, curr_test_errs = run_feature_selection_scikit(
+        prep_data,
+        model_name,
+        custom_objective,
+        target,
+        w_est, row_and_col_names,
+        n_runs, N_SELECT_FEATURES,
+        full_feats,
+        solver_cfg=solver_cfg,
+        model_factory=model_factory,
 
-        )
+    )
 
-        res_dict[target_col] = (curr_feats, curr_train_errs, curr_test_errs)
+    #res_dict[target_col] = (curr_feats, curr_train_errs, curr_test_errs)
 
-    return res_dict
+    return curr_feats, curr_train_errs, curr_test_errs
 
 
 if __name__ == "__main__":

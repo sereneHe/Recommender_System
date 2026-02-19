@@ -5,6 +5,9 @@ N_SELECT_FEATURES: 5
 n_runs: 5
 recalculate_dag: true
 
+
+feature_selector: SequentialFeatureSelector
+
 #EXDBN parameters
 loss_type: l2
 reg_type: l2

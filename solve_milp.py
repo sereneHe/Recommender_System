@@ -188,9 +188,11 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
     # if loss_type == 'l2':
     #     X = X - np.mean(X, axis=0, keepdims=True)
 
-
-    m = gp.Model()
-    m.setParam("OutputFlag", 0)
+    env = gp.Env(empty=True)
+    env.setParam("OutputFlag", 0)
+    env.start()
+    m = gp.Model(env=env)
+    #m.setParam("OutputFlag", 0)
     W_edges_vars, W_edges_weights = construct_matrix_vars(m, d, 'W', constraints_mode, weights_bound, tabu_edges)
     for v1 in range(d):
         for v2 in range(v1):
@@ -260,7 +262,7 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
             m.setObjective(gp.quicksum((X[i,j] - gp.quicksum(X[i, k] * W_edges_weights[k, j] for k in range(d) if k != j)
                                         - gp.quicksum(Y[t][i, k] * A_edges_weights[t][k, j] for k in range(d) for t in range(p))
                                         )**2 for i in range(n) for j in range(d))/n + lambda1 * reg / d + lambda2 * reg2 / d, GRB.MINIMIZE)
-            print(m.getObjective().getValue())
+            #print(m.getObjective().getValue())
     elif loss_type == 'l1':
 
         abs_vars = {}

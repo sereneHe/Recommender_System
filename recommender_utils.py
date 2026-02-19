@@ -1,3 +1,4 @@
+import mlflow
 import numpy as np
 import logging
 from sklearn.feature_selection import SequentialFeatureSelector
@@ -120,7 +121,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
                                     prep_data, solver_cfg)
     if model is None:
         raise ValueError("Model can be only XGB or REG.")
-
+    #mlflow.log_param("feature_selector", "SequentialFeatureSelector")
     sfs = SequentialFeatureSelector(
         model,
         direction="forward",
@@ -158,4 +159,4 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         return_train_score=True
     )
 
-    return best_features, [results["train_score"].mean()], [results["test_score"].mean()]
+    return best_features, results["train_score"].mean(), results["test_score"].mean()

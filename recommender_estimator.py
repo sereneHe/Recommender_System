@@ -84,15 +84,15 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                 # if d <= 2:
                 #     w_est = np.zeros((d,d))
                 # else:
-                print("max X", X.max(), "min X", X.min())
+                #print("max X", X.max(), "min X", X.min())
                 current_column_names = self.get_current_column_names(X)
                 G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
-                g_nodes = list(G.nodes())
-                print(G.nodes())
-                print(current_column_names + [self.target_col])
+                #g_nodes = list(G.nodes())
+                #print(G.nodes())
+                #print(current_column_names + [self.target_col])
                 H = G.subgraph(current_column_names + [self.target_col]).copy()
-                if H.number_of_nodes() > 0:
-                    print('not emty')
+                # if H.number_of_nodes() > 0:
+                #     print('not emty')
                 H = nx.complement(H)
                 col_to_idx = {col: idx for idx, col in enumerate(current_column_names + [self.target_col])}
                 tabu_edges = list((col_to_idx[s],col_to_idx[e]) for (s,e) in H.edges())
