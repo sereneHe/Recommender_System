@@ -69,10 +69,10 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
                                                                         tabu_edges=tabu_edges )
                 #print(w_est)
 
-                row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-                idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
-                predict_idx = row_and_col_names_indices[self.target_col]
-                w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+                # row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
+                # idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+                # predict_idx = row_and_col_names_indices[self.target_col]
+                # w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
                 #print(w_est2)
 
             else:

@@ -85,7 +85,7 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                 #     w_est = np.zeros((d,d))
                 # else:
                 print("max X", X.max(), "min X", X.min())
-                current_column_names = list(self.prep_data.columns) # self.get_current_column_names(X)
+                current_column_names = self.get_current_column_names(X)
                 G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
                 g_nodes = list(G.nodes())
                 print(G.nodes())
@@ -104,10 +104,10 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                                                                         tabu_edges=tabu_edges )
                 #print(w_est)
 
-                row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-                idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
-                predict_idx = row_and_col_names_indices[self.target_col]
-                w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+                # row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
+                # idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+                # predict_idx = row_and_col_names_indices[self.target_col]
+                # w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
                 #print(w_est2)
 
             else:

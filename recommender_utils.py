@@ -112,12 +112,12 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
     model = None
     if model_name == "XGB":
-        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names], solver_cfg)
+        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg) #prep_data[row_and_col_names]
     elif model_name == "REG":
-        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names], solver_cfg)
+        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
     elif model_name == "HC":
         model = HCRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective,
-                                    prep_data[row_and_col_names], solver_cfg)
+                                    prep_data, solver_cfg)
     if model is None:
         raise ValueError("Model can be only XGB or REG.")
 
@@ -134,7 +134,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     y = prep_data[target_col]
 
     #TODO this deletes only 30 columns out of 508, so I will do this so that scikit feature selection works (no nas)
-    prep_data = prep_data[full_feats]
+    #prep_data = prep_data[full_feats]
     prep_data = prep_data.dropna(axis=1)
     X = prep_data.drop(target_col, axis=1) if target_col in prep_data.columns else prep_data
 
