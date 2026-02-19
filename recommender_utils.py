@@ -4,6 +4,7 @@ from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.model_selection import cross_validate
 
 from compute_tools import compute_predictor_errors
+from recomender_humancompatible import HCRecommenderPredictor
 from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, compute_predictor_errors_scikit
 
 
@@ -101,7 +102,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
                           target_col,
                           w_est, row_and_col_names,
                           n_runs, n_features,
-                          full_feats, model_factory=None
+                          full_feats, solver_cfg, model_factory=None
                           ):
     logging.info(f"w_est shape {w_est.shape}")
     logging.info(f"target_col {target_col}")
@@ -111,9 +112,9 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
     model = None
     if model_name == "XGB":
-        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names])
+        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names], solver_cfg)
     elif model_name == "REG":
-        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names])
+        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data[row_and_col_names], solver_cfg)
     if model is None:
         raise ValueError("Model can be only XGB or REG.")
 

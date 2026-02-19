@@ -1,7 +1,9 @@
 import mlflow
+import networkx as nx
 import numpy as np
 import zipfile
 from pathlib import Path
+from os.path import join
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -15,7 +17,7 @@ from data_helper import load_all_data
 from recommender_utils import run_feature_selection, run_feature_selection_scikit
 
 
-def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs):
+def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs, solver_cfg):
     assert custom_objective in ['lagrange', 'mse_custom','mse_builtin']
 
 
@@ -58,7 +60,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
                       'Systolic Blood Pressure (mm Hg)', 'Diastolic Blood Pressure (mm Hg)',
                       'CRP (mg/dL)', 'whtr(waist-height_ratio)']
     """
-    target_columns = ['GLU (mg/dL)']
+    target_columns = [target] # ['GLU (mg/dL)']
     # target_columns = ['whtr(waist-height_ratio)']
 
 
@@ -71,6 +73,17 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
 
     mlflow.log_text('['+", ".join(full_feats) + "]", "full_feats_list.txt")
 
+    current_column_names = list(prep_data.columns) # food_feats + non_food_feats
+    current_column_names2 = food_feats + non_food_feats
+    G = nx.read_graphml(join(solver_cfg.data_path, solver_cfg.knowledge_graph_filename))
+    print(G.nodes())
+    print(current_column_names)
+    H = G.subgraph(current_column_names ).copy()
+    if H.number_of_nodes() > 0:
+        print('not emty')
+    H = nx.complement(H)
+    print(H.nodes())
+
     res_dict = {}
 
     for target_col in target_columns:
@@ -82,7 +95,9 @@ def run_recommender(food_feats, non_food_feats, prep_data, w_est, row_and_col_na
             w_est, row_and_col_names,
             n_runs, N_SELECT_FEATURES,
             full_feats,
-            model_factory=model_factory
+            solver_cfg=solver_cfg,
+            model_factory=model_factory,
+
         )
 
         res_dict[target_col] = (curr_feats, curr_train_errs, curr_test_errs)
