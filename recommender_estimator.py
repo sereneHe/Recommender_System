@@ -85,8 +85,9 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                 #     w_est = np.zeros((d,d))
                 # else:
                 print("max X", X.max(), "min X", X.min())
-                current_column_names = self.get_current_column_names(X)
+                current_column_names = list(self.prep_data.columns) # self.get_current_column_names(X)
                 G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
+                g_nodes = list(G.nodes())
                 print(G.nodes())
                 print(current_column_names + [self.target_col])
                 H = G.subgraph(current_column_names + [self.target_col]).copy()

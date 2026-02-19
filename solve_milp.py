@@ -190,6 +190,7 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
 
 
     m = gp.Model()
+    m.setParam("OutputFlag", 0)
     W_edges_vars, W_edges_weights = construct_matrix_vars(m, d, 'W', constraints_mode, weights_bound, tabu_edges)
     for v1 in range(d):
         for v2 in range(v1):

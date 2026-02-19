@@ -75,6 +75,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_an
 
     current_column_names = list(prep_data.columns) # food_feats + non_food_feats
     current_column_names2 = food_feats + non_food_feats
+    current_column_names = row_and_col_names
     G = nx.read_graphml(join(solver_cfg.data_path, solver_cfg.knowledge_graph_filename))
     print(G.nodes())
     print(current_column_names)
