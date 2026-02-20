@@ -2,6 +2,7 @@ import mlflow
 import numpy as np
 import logging
 from sklearn.feature_selection import SequentialFeatureSelector
+from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import cross_validate
 
 from compute_tools import compute_predictor_errors
@@ -111,6 +112,8 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     logging.info(f"prep_data.shape {prep_data.shape}")
     logging.info(f"row_and_col_names {row_and_col_names}")
 
+
+
     model = None
     if model_name == "XGB":
         model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg) #prep_data[row_and_col_names]
@@ -133,6 +136,8 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     assert all(isinstance(col, str) for col in prep_data.columns)
 
     y = prep_data[target_col]
+
+    score_normalizer = mean_squared_error(y, np.ones_like(y) * y.mean())
 
     #TODO this deletes only 30 columns out of 508, so I will do this so that scikit feature selection works (no nas)
     #prep_data = prep_data[full_feats]
@@ -159,4 +164,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         return_train_score=True
     )
 
-    return best_features, results["train_score"].mean(), results["test_score"].mean()
+    test_mse = results["test_score"].mean() / score_normalizer
+    train_mse = results["train_score"].mean() / score_normalizer
+
+    return best_features, train_mse, test_mse

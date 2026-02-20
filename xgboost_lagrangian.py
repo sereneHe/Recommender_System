@@ -1,6 +1,16 @@
 import numpy as np
+from sklearn.metrics import mean_squared_error
+
 np.seterr(invalid="raise")
 import xgboost as xgb
+
+
+def compute_predictor_errors_scikit(preds, y, _y_train_mean_):
+    test_mse = mean_squared_error(y, preds)
+    test_bench = mean_squared_error(y, np.ones_like(y) * _y_train_mean_)
+
+    return test_mse / test_bench
+
 
 def fit_aug_lagrangian_W_constraint(
     X, y, W,
@@ -41,6 +51,7 @@ def fit_aug_lagrangian_W_constraint(
             #n_estimators=cfg.n_estimators,
             max_depth=cfg.max_depth,
             eta=cfg.learning_rate,
+            #objective="reg:squarederror",
             #tree_method="hist",
             seed=cfg.random_state,
         )
@@ -104,6 +115,10 @@ def fit_aug_lagrangian_W_constraint(
         )
 
         preds = booster.predict(dtrain)
+
+        # score = compute_predictor_errors_scikit(preds, y, y.mean())
+        # print(f"Outer {k}: score = {score:.3f}")
+
         muY = float(preds.mean())
         g = g0 + muY * v
 
@@ -119,5 +134,4 @@ def fit_aug_lagrangian_W_constraint(
                 f"outer={k:02d}  mean(yhat)={muY:+.6e}  ||g||={np.linalg.norm(g):.6e}  "
                 f"lambda_norm={np.linalg.norm(lam):.6e}  rho={rho:.3g}"
             )
-
     return booster, lam

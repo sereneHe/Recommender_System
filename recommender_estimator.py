@@ -19,9 +19,9 @@ from xgboost import XGBRegressor
 
 def compute_predictor_errors_scikit(estimator, X, y):
     test_mse = mean_squared_error(y, estimator.predict(X))
-    test_bench = mean_squared_error(y, np.ones_like(y) * estimator._y_train_mean_)
+    #test_bench = mean_squared_error(y, np.ones_like(y) * estimator._y_train_mean_)
 
-    return test_mse / test_bench
+    return test_mse # / test_bench
 
 
 class RecommenderBaseEstimator(BaseEstimator):
@@ -73,10 +73,10 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
 
     def fit(self, X, y=None):
         _, X, y = self.preprocess_data(X, y)
-        self._y_train_mean_ = y.mean()
+        #self._y_train_mean_ = y.mean()
         if self.custom_objective in ['lagrange', 'mse_custom']:
             self.scaler_ = StandardScaler()
-            self.scaler_.fit_transform(X)
+            X = self.scaler_.fit_transform(X) # y?
 
             if self.cfg.recalculate_dag:
                 d = X.shape[1] + 1 # adding one for y
