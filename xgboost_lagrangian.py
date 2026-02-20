@@ -18,7 +18,7 @@ def fit_aug_lagrangian_W_constraint(
     """
 
     params = None
-    num_boost_round = cfg.num_boost_round
+    num_boost_round = cfg.n_estimators
     n_outer = cfg.n_outer
     rho0 = cfg.rho0
     rho_mult = cfg.rho_mult

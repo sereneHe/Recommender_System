@@ -9,9 +9,9 @@ n_estimators: 10
 max_depth: 3
 learning_rate: 0.1
 random_state: 42
-num_boost_round: 10 #300
+#num_boost_round: 300 # 10 # n_estimators
 n_outer: 10
-rho0: 1.0
+rho0: 0.0
 rho_mult: 2.0
 
 feature_selector: SequentialFeatureSelector
