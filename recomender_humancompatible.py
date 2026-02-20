@@ -39,10 +39,10 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
 
     def fit(self, X, y=None):
         _, X, y = self.preprocess_data(X, y)
-        self._y_train_mean_ = y.mean()
+        # self._y_train_mean_ = y.mean()
         if self.custom_objective in ['lagrange', 'mse_custom']:
             self.scaler_ = StandardScaler()
-            self.scaler_.fit_transform(X)
+            X = self.scaler_.fit_transform(X)
 
             if self.cfg.recalculate_dag:
                 d = X.shape[1] + 1 # adding one for y
