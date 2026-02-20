@@ -18,7 +18,7 @@ from recommender_utils import run_feature_selection, run_feature_selection_sciki
 
 
 def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_and_col_names, model_name, custom_objective, N_SELECT_FEATURES, n_runs, solver_cfg):
-    assert custom_objective in ['lagrange', 'mse_custom','mse_builtin']
+    assert custom_objective in ['lagrange', 'mse_custom','mse_builtin', 'reg:squarederror']
 
 
     model_factory = None

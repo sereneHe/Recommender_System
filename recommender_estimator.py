@@ -26,7 +26,7 @@ def compute_predictor_errors_scikit(estimator, X, y):
 
 class RecommenderBaseEstimator(BaseEstimator):
     def __init__(self, w_est, target_col, row_and_col_names, custom_objective, prep_data, cfg):
-        if custom_objective is None or custom_objective not in ['lagrange', 'mse_builtin', 'mse_custom']:
+        if custom_objective is None or custom_objective not in ['lagrange', 'mse_builtin', 'mse_custom', 'reg:squarederror']:
             raise ValueError("Custom objective can be only lagrange, mse_builtin, mse_custom")
 
         self.w_est = w_est  # the exDBN matrix
@@ -96,8 +96,8 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                 H = nx.complement(H)
                 col_to_idx = {col: idx for idx, col in enumerate(current_column_names + [self.target_col])}
                 tabu_edges = list((col_to_idx[s],col_to_idx[e]) for (s,e) in H.edges())
-                if tabu_edges:
-                    print(tabu_edges)
+                # if tabu_edges:
+                #     print(tabu_edges)
                 w_est, _, _, _, _ = solve_milp.solve(X_y, self.cfg, self.cfg.nonzero_threshold,
                                                                         Y=[],
                                                                         B_ref=np.zeros((d,d)),
@@ -119,20 +119,20 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
             # call exdbn
 
 
-            self._rf_model_, lam = fit_aug_lagrangian_W_constraint(X, y, w_est, num_boost_round=10)
+            self._rf_model_, lam = fit_aug_lagrangian_W_constraint(X, y, w_est, self.cfg)
         else:
             model_class = Pipeline
             model_params = {
                 'steps': [
                     ("scale", StandardScaler()),
                     ("xgb", XGBRegressor(
-                        n_estimators=10,
-                        max_depth=3,
-                        learning_rate=0.1,
-                        random_state=42,
+                        n_estimators=self.cfg.n_estimators,
+                        max_depth=self.cfg.max_depth,
+                        learning_rate=self.cfg.learning_rate,
+                        random_state=self.cfg.random_state,
                         # tree_method="hist",
-                        base_score=y.mean(),
-                        objective='reg:squarederror'
+                        # base_score=y.mean(),
+                        #objective='reg:squarederror'
                     )
                      )
                 ]

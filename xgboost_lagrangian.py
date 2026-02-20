@@ -4,11 +4,8 @@ import xgboost as xgb
 
 def fit_aug_lagrangian_W_constraint(
     X, y, W,
-    params=None,
-    num_boost_round=300,
-    n_outer=10,
-    rho0=1.0,
-    rho_mult=2.0,
+    cfg,
+
     lam0=None,
     sample_weight=None,
     verbose=False
@@ -19,6 +16,13 @@ def fit_aug_lagrangian_W_constraint(
 
     Uses augmented Lagrangian with vector lambda.
     """
+
+    params = None,
+    num_boost_round = cfg.num_boost_round
+    n_outer = cfg.n_outer
+    rho0 = cfg.rho0
+    rho_mult = cfg.rho_mult
+
     X = np.asarray(X)
     y = np.asarray(y)
     W = np.asarray(W)
@@ -34,10 +38,11 @@ def fit_aug_lagrangian_W_constraint(
 
     if params is None:
         params = dict(
-            max_depth=3,
-            eta=0.1,
+            n_estimators=cfg.n_estimators,
+            max_depth=cfg.max_depth,
+            eta=cfg.learning_rate,
             #tree_method="hist",
-            seed=42,
+            seed=cfg.random_state,
         )
     params = dict(params)  # copy
     params["base_score"] = base_score

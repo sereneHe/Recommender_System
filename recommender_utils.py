@@ -154,7 +154,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
 
     results = cross_validate(model, X_selected, y,
-        cv=10,
+        cv=n_runs,
         scoring=compute_predictor_errors_scikit,
         return_train_score=True
     )

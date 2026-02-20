@@ -1,0 +1,39 @@
+name: mark_with_cc
+model_name: XGB
+custom_objective: lagrange #mse_builtin #mse_custom
+N_SELECT_FEATURES: 5
+n_runs: 5
+recalculate_dag: true
+
+n_estimators: 10
+max_depth: 3
+learning_rate: 0.1
+random_state: 42
+num_boost_round: 10 #300
+n_outer: 10
+rho0: 1.0,
+rho_mult: 2.0
+
+feature_selector: SequentialFeatureSelector
+
+#EXDBN parameters
+loss_type: l2
+reg_type: l2
+a_reg_type: l1
+lambda1: 000.1
+lambda2: 000.1
+nonzero_threshold: 0.001
+constraints_mode: weights
+callback_mode: all_cycles # shortest_cycle
+robust: false
+tabu_edges: false
+weights_bound: 1.0
+time_limit: 1800
+target_mip_gap: 0.0001
+
+
+data_path: '../codiet_data/'
+knowledge_graph_filename: 'knowledge_graph_intersection.graphml'
+
+# debugging
+debug: false
