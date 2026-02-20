@@ -17,7 +17,7 @@ def fit_aug_lagrangian_W_constraint(
     Uses augmented Lagrangian with vector lambda.
     """
 
-    params = None,
+    params = None
     num_boost_round = cfg.num_boost_round
     n_outer = cfg.n_outer
     rho0 = cfg.rho0
@@ -38,7 +38,7 @@ def fit_aug_lagrangian_W_constraint(
 
     if params is None:
         params = dict(
-            n_estimators=cfg.n_estimators,
+            #n_estimators=cfg.n_estimators,
             max_depth=cfg.max_depth,
             eta=cfg.learning_rate,
             #tree_method="hist",
