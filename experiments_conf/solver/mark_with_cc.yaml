@@ -11,8 +11,8 @@ learning_rate: 0.1
 random_state: 42
 #num_boost_round: 300 # 10 # n_estimators
 n_outer: 10
-rho0: 0.0
-rho_mult: 2.0
+rho0: 0.01
+rho_mult: 1.01
 
 feature_selector: SequentialFeatureSelector
 

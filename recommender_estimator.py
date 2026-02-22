@@ -77,10 +77,13 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
         if self.custom_objective in ['lagrange', 'mse_custom']:
             self.scaler_ = StandardScaler()
             X = self.scaler_.fit_transform(X) # y?
+            self._y_mean = y.mean()
+            self._y_std = y.std()
+            y_scaled = (y - self._y_mean) / self._y_std # ExDBN may not work well, if we do not normalize also y
 
             if self.cfg.recalculate_dag:
                 d = X.shape[1] + 1 # adding one for y
-                X_y = np.column_stack((X, y.to_numpy()))
+                X_y = np.column_stack((X, y_scaled.to_numpy()))
                 # if d <= 2:
                 #     w_est = np.zeros((d,d))
                 # else:
@@ -119,7 +122,8 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
             # call exdbn
 
 
-            self._rf_model_, lam = fit_aug_lagrangian_W_constraint(X, y, w_est, self.cfg)
+            self._rf_model_, lam = fit_aug_lagrangian_W_constraint(X, y_scaled, w_est, self.cfg)
+            self._y_normalized = True
         else:
             model_class = Pipeline
             model_params = {
@@ -139,14 +143,19 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
             }
             rf_model = model_class(**model_params)
             self._rf_model_ = rf_model.fit(X, y)
-            return self
+            self._y_normalized = False
+        return self
 
     def predict(self, X):
         if self.custom_objective in ['lagrange', 'mse_custom']:
             X = self.scaler_.transform(X)
-            return self._rf_model_.predict(xgb.DMatrix(X))
+            prediction = self._rf_model_.predict(xgb.DMatrix(X))
         else:
-            return super().predict(X)
+            prediction = super().predict(X)
+
+        if self._y_normalized:
+            prediction = prediction * self._y_std + self._y_mean
+        return prediction
 
 
 class REGRecommenderPredictor(RecommenderBaseEstimator):
