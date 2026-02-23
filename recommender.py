@@ -90,7 +90,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_an
     # res_dict = {}
 
     #for target_col in target_columns:
-    curr_feats, curr_train_errs, curr_test_errs = run_feature_selection_scikit(
+    curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs = run_feature_selection_scikit(
         prep_data,
         model_name,
         custom_objective,
@@ -105,7 +105,7 @@ def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_an
 
     #res_dict[target_col] = (curr_feats, curr_train_errs, curr_test_errs)
 
-    return curr_feats, curr_train_errs, curr_test_errs
+    return curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs
 
 
 if __name__ == "__main__":

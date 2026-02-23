@@ -167,4 +167,4 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     test_mse = results["test_score"].mean() / score_normalizer
     train_mse = results["train_score"].mean() / score_normalizer
 
-    return best_features, train_mse, test_mse
+    return best_features, train_mse, test_mse, results["train_score"] / score_normalizer, results["test_score"] / score_normalizer

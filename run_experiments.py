@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import mlflow
-from mlflow import log_metric, log_metrics, log_param, log_artifact, log_text, log_table
+from mlflow import log_metric, log_metrics, log_param, log_artifact, log_text, log_table, log_dict
 
 
 @hydra.main(version_base=None,  config_path="./experiments_conf", config_name="config")
@@ -52,8 +52,9 @@ def start_experiment(cfg: DictConfig) -> None:
         print(row_and_col_names)
         start_time = time.time()
         target_feat = cfg.problem.target
-        curr_feats, curr_train_err, curr_test_err = run_recommender(food_feats, non_food_feats, prep_data, target_feat, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
+        curr_feats, curr_train_err, curr_test_err, all_train_errs, all_test_errs = run_recommender(food_feats, non_food_feats, prep_data, target_feat, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
 
+        log_dict({'train_errs': all_train_errs.tolist(), 'test_errs': all_test_errs.tolist()}, 'cv_errors.yaml')
         # print(result)
         #
         # assert len(result) == 1
