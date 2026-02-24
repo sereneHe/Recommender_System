@@ -150,6 +150,8 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
     # here are the selected features
     best_features = X.columns[sfs.get_support()]
+    mlflow.log_metric("number_of_best_features", len(best_features))
+    mlflow.log_dict({'selected_best_features': list(best_features)}, "selected_features.yaml")
     selected_indices = sfs.get_support(indices=True)
 
     logging.info(f"Best features {best_features}, {selected_indices}")
