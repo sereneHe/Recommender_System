@@ -11,7 +11,7 @@ learning_rate: 0.1
 random_state: 42
 #num_boost_round: 300 # 10 # n_estimators
 n_outer: 10
-rho0: 1.0
+rho0: 0.1
 rho_mult: 1.01
 
 feature_selector: SequentialFeatureSelector
@@ -20,15 +20,15 @@ feature_selector: SequentialFeatureSelector
 loss_type: l2
 reg_type: l2
 a_reg_type: l1
-lambda1: 000.1
-lambda2: 000.1
+lambda1: 0.01
+lambda2: 0.01
 nonzero_threshold: 0.001
 constraints_mode: weights
 callback_mode: all_cycles # shortest_cycle
 robust: false
 tabu_edges: false
 weights_bound: 1.0
-time_limit: 1800
+time_limit: 300
 target_mip_gap: 0.0001
 
 
