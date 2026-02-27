@@ -136,7 +136,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
 
     assert all(isinstance(col, str) for col in prep_data.columns)
-
+    prep_data = prep_data.dropna(subset=[target_col])
     y = prep_data[target_col]
 
     score_normalizer = mean_squared_error(y, np.ones_like(y) * y.mean())
@@ -172,10 +172,14 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
         X_selected = X.iloc[:, selected_indices]
         X_selected = X_selected.to_numpy() # CV did not work with pandas data frame, IDKW
+        w_est = None
     else:
         model.fit(X, y)
         X_selected = X.to_numpy()
         best_features = full_feats
+        w_est = model._w_est
+
+
 
 
     results = cross_validate(model, X_selected, y,
@@ -187,4 +191,4 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     test_mse = results["test_score"].mean() / score_normalizer
     train_mse = results["train_score"].mean() / score_normalizer
 
-    return best_features, train_mse, test_mse, results["train_score"] / score_normalizer, results["test_score"] / score_normalizer
+    return best_features, train_mse, test_mse, results["train_score"] / score_normalizer, results["test_score"] / score_normalizer, w_est

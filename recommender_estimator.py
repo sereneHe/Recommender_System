@@ -36,6 +36,7 @@ class RecommenderBaseEstimator(BaseEstimator):
         self.prep_data = prep_data
         self._rf_model_ = None
         self.feature_names_in_ = None
+        self._w_est = None
         self.cfg = cfg
 
     def predict(self, X):
@@ -105,6 +106,7 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                                                                         Y=[],
                                                                         B_ref=np.zeros((d,d)),
                                                                         tabu_edges=tabu_edges )
+                self._w_est = w_est # dont read this property if feature selector is used.
                 #print(w_est)
 
                 # row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}

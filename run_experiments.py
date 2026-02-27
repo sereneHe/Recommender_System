@@ -13,7 +13,7 @@ from data_helper import load_all_data
 from experiments_utils import log_system_info, log_params_from_omegaconf_dict
 from recommender import run_recommender
 from recommender_utils import run_feature_selection_scikit
-from utils import log_exceptions
+from utils import log_exceptions, plot_heatmap
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def start_experiment(cfg: DictConfig) -> None:
         full_feats = cfg.problem.features
         current_column_names = list(prep_data.columns)  # food_feats + non_food_feats
         mlflow.log_text('[' + ", ".join(current_column_names) + "]", "data_feats_list.txt")
-        curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs = run_feature_selection_scikit(
+        curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs, w_est = run_feature_selection_scikit(
             prep_data,
             cfg.solver.model_name,
             cfg.solver.custom_objective,
@@ -68,6 +68,16 @@ def start_experiment(cfg: DictConfig) -> None:
             model_factory=None,
 
         )
+
+        if w_est is not None:
+            np.savetxt(join(output_dir, 'W_est.csv'), w_est, delimiter=',')
+            mlflow.log_artifact(join(output_dir, 'W_est.csv'))
+            if full_feats is not None:
+                intra_nodes = full_feats + [target_feat]
+            else:
+                intra_nodes = list(prep_data.columns) + [target_feat]
+            plot_heatmap(w_est, intra_nodes, intra_nodes, filename=join(output_dir, f'W_est_heatmap.png'))
+            mlflow.log_artifact(join(output_dir, f'W_est_heatmap.png'))
 
         # res_dict[target_col] = (curr_feats, curr_train_errs, curr_test_errs)
 
