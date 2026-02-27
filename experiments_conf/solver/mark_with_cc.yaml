@@ -14,7 +14,7 @@ n_outer: 10
 rho0: 0.1
 rho_mult: 1.01
 
-feature_selector: SequentialFeatureSelector
+feature_selector: null #SequentialFeatureSelector
 
 #EXDBN parameters
 loss_type: l2
