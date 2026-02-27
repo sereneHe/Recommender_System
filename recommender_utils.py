@@ -100,6 +100,22 @@ def run_feature_selection(prep_data, model_name,custom_objective,
     return curr_feats, curr_train_errs, curr_test_errs
 
 
+def create_model(model_name, w_est, target_col, row_and_col_names, custom_objective, prep_data,
+                                        solver_cfg):
+    model = None
+    if model_name == "XGB":
+        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data,
+                                        solver_cfg)  # prep_data[row_and_col_names]
+    elif model_name == "REG":
+        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
+    elif model_name == "HC":
+        model = HCRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective,
+                                       prep_data, solver_cfg)
+    if model is None:
+        raise ValueError("Model can be only XGB or REG.")
+    return model
+
+
 def run_feature_selection_scikit(prep_data, model_name, custom_objective,
                           target_col,
                           w_est, row_and_col_names,
@@ -114,24 +130,10 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
 
 
-    model = None
-    if model_name == "XGB":
-        model = XGBRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg) #prep_data[row_and_col_names]
-    elif model_name == "REG":
-        model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
-    elif model_name == "HC":
-        model = HCRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective,
-                                    prep_data, solver_cfg)
-    if model is None:
-        raise ValueError("Model can be only XGB or REG.")
+    model = create_model(model_name, w_est, target_col, row_and_col_names, custom_objective, prep_data,
+                                        solver_cfg)
     #mlflow.log_param("feature_selector", "SequentialFeatureSelector")
-    sfs = SequentialFeatureSelector(
-        model,
-        direction="forward",
-        scoring=compute_predictor_errors_scikit,
-        cv=n_runs,
-        n_features_to_select=n_features
-    )
+
 
     assert all(isinstance(col, str) for col in prep_data.columns)
 
@@ -143,21 +145,37 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     #prep_data = prep_data[full_feats]
     prep_data = prep_data.dropna(axis=1)
     X = prep_data.drop(target_col, axis=1) if target_col in prep_data.columns else prep_data
+    if full_feats is not None:
+        X = X[full_feats]
 
     logging.info(f"Testing on columns {len(X.columns)}: {X.columns}")
 
-    sfs.fit(X, y)
+    if 'feature_selector' in solver_cfg and solver_cfg.feature_selector == 'SequentialFeatureSelector':
+        sfs = SequentialFeatureSelector(
+            model,
+            direction="forward",
+            scoring=compute_predictor_errors_scikit,
+            cv=n_runs,
+            n_features_to_select=n_features
+        )
 
-    # here are the selected features
-    best_features = X.columns[sfs.get_support()]
-    mlflow.log_metric("number_of_best_features", len(best_features))
-    mlflow.log_dict({'selected_best_features': list(best_features)}, "selected_features.yaml")
-    selected_indices = sfs.get_support(indices=True)
+        sfs.fit(X, y)
 
-    logging.info(f"Best features {best_features}, {selected_indices}")
 
-    X_selected = X.iloc[:, selected_indices]
-    X_selected = X_selected.to_numpy() # CV did not work with pandas data frame, IDKW
+        # here are the selected features
+        best_features = X.columns[sfs.get_support()]
+        mlflow.log_metric("number_of_best_features", len(best_features))
+        mlflow.log_dict({'selected_best_features': list(best_features)}, "selected_features.yaml")
+        selected_indices = sfs.get_support(indices=True)
+
+        logging.info(f"Best features {best_features}, {selected_indices}")
+
+        X_selected = X.iloc[:, selected_indices]
+        X_selected = X_selected.to_numpy() # CV did not work with pandas data frame, IDKW
+    else:
+        model.fit(X, y)
+        X_selected = X.to_numpy()
+        best_features = full_feats
 
 
     results = cross_validate(model, X_selected, y,

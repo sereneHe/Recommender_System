@@ -12,6 +12,7 @@ from hydra.core.hydra_config import HydraConfig
 from data_helper import load_all_data
 from experiments_utils import log_system_info, log_params_from_omegaconf_dict
 from recommender import run_recommender
+from recommender_utils import run_feature_selection_scikit
 from utils import log_exceptions
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,28 @@ def start_experiment(cfg: DictConfig) -> None:
         print(row_and_col_names)
         start_time = time.time()
         target_feat = cfg.problem.target
-        curr_feats, curr_train_err, curr_test_err, all_train_errs, all_test_errs = run_recommender(food_feats, non_food_feats, prep_data, target_feat, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
+        full_feats = cfg.problem.features
+        current_column_names = list(prep_data.columns)  # food_feats + non_food_feats
+        mlflow.log_text('[' + ", ".join(current_column_names) + "]", "data_feats_list.txt")
+        curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs = run_feature_selection_scikit(
+            prep_data,
+            cfg.solver.model_name,
+            cfg.solver.custom_objective,
+            target_feat,
+            w_est, row_and_col_names,
+            cfg.solver.n_runs, cfg.solver.N_SELECT_FEATURES,
+            full_feats,
+            solver_cfg=cfg.solver,
+            model_factory=None,
+
+        )
+
+        # res_dict[target_col] = (curr_feats, curr_train_errs, curr_test_errs)
+
+        #return curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs
+
+
+        #curr_feats, curr_train_err, curr_test_err, all_train_errs, all_test_errs = run_recommender(food_feats, non_food_feats, prep_data, target_feat, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
 
         log_dict({'train_errs': all_train_errs.tolist(), 'test_errs': all_test_errs.tolist()}, 'cv_errors.yaml')
         # print(result)
@@ -66,8 +88,8 @@ def start_experiment(cfg: DictConfig) -> None:
 
         # train_err = curr_train_errs[-1]
         # test_err = curr_test_errs[-1]
-        log_metric(f'train_error', curr_train_err)
-        log_metric(f'test_err', curr_test_err)
+        log_metric(f'train_error', curr_train_errs)
+        log_metric(f'test_err', curr_test_errs)
 
 
         solving_duration = time.time() - start_time
