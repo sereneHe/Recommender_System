@@ -1,0 +1,18 @@
+name: codiet
+target: 'HbA1c (%)'
+
+
+features:
+  - food_TSFAT
+  - MVC (fL)
+  - ms_urine_glutamic-acid
+  - ms_urine_phenylalanine
+  - ms_urine_tyrosine
+  - nmr_urine_2-methylsuccinic-acid
+  - nmr_urine_oxaloacetic-acid
+  - nmr_urine_adenosine
+  - nmr_urine_myo-inositol
+  - dbs_rbc_lip_d-sfa
+  - microb_4cl_label_2
+  - microb_phyl4cl_label_1
+  - microb_large_emb_coord_2

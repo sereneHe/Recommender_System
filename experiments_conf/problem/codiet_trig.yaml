@@ -1,0 +1,10 @@
+name: codiet
+target: 'TRIG (mg/dL)' #'GLU (mg/dL)'
+
+
+features: #null
+  - ID
+  - nmr_urine_1-methylhistidine
+  - nmr_urine_adenosine
+  - nmr_urine_myo-inositol
+  - ms_lip_pe-o-20:2-22:6

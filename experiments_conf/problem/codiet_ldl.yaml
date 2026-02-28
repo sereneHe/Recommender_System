@@ -1,0 +1,14 @@
+name: codiet
+target: 'LDL (mg/dL)'
+
+
+features:
+  - food_TALCO
+  - khz-rl_50_phase_angle
+  - HGB (g/dL)
+  - ms_serum_ornithine
+  - ms_urine_glutamine
+  - nmr_urine_2-furoylglycine
+  - nmr_urine_guanidinoacetic-acid
+  - nmr_urine_acetone
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Clostridiaceae|g__Clostridium

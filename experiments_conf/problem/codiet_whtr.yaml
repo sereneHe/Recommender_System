@@ -1,0 +1,18 @@
+name: codiet
+target: 'whtr(waist-height_ratio)' #'GLU (mg/dL)'
+
+
+features: #null
+  - food_SEAPLANT
+  - nmr_urine_adenosine
+  - dbs_rbc_lip_rbc-eicosadienoic-20-2n6
+  - dbs_rbc_lip_d-epa-dha
+  - microb_4cl_label_0
+  - microb_4cl_label_3
+  - microb_phyl4cl_label_0
+  - microb_phyl4cl_label_3
+  - microb_clean15_trnk_k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Prevotellaceae|g__Prevotella
+  - microb_clean15_trnk_k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Bacteroidaceae|g__Phocaeicola
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Mediterraneibacter
+  - site_continental
+  - normed_food_T_G_WHOLE

@@ -1,0 +1,12 @@
+name: codiet
+target: 'HDL (mg/dL)'
+
+
+features:
+  - food_T_V_TOTAL
+  - ms_urine_4-hydroxyproline
+  - nmr_urine_d-mannose
+  - dbs_rbc_lip_d-linoleic-18-2n6
+  - dbs_rbc_lip_d-dgla-20-3n6
+  - dbs_rbc_lip_d-omega-6
+  - microb_large_emb_coord_15

@@ -1,0 +1,12 @@
+name: codiet
+target: 'GLU (mg/dL)'
+
+
+features:
+  - khz-rl_250_phase_angle
+  - measured_circumference_of_hip
+  - conicity_index
+  - nmr_urine_oxaloacetic-acid
+  - dbs_rbc_lip_d-dha-22-6n3
+  - dbs_rbc_lip_d-epa-dha
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Roseburia

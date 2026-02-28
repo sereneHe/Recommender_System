@@ -1,0 +1,13 @@
+name: codiet
+target: 'Systolic Blood Pressure (mm Hg)' #'GLU (mg/dL)'
+
+
+features: #null
+  - ID
+  - ffm_control
+  - nmr_urine_2-methylsuccinic-acid
+  - nmr_urine_adenosine
+  - ms_lip_lpe-18:2
+  - ms_lip_pe-o-19:1-20:4
+  - microb_4cl_label_0
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Oscillospiraceae|g__Faecalibacterium

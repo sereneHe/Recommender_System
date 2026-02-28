@@ -1,0 +1,16 @@
+name: codiet
+target: 'Diastolic Blood Pressure (mm Hg)' #'GLU (mg/dL)'
+
+
+features: #null
+  - gender_numeric
+  - nmr_urine_4-aminobutyric-acid
+  - nmr_urine_trigonelline
+  - nmr_urine_adenosine
+  - microb_4cl_label_0
+  - microb_4cl_label_1
+  - microb_4cl_label_3
+  - microb_phyl4cl_label_1
+  - microb_phyl4cl_label_3
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Fusicatenibacter
+  - normed_food_T_V_DRKGR
