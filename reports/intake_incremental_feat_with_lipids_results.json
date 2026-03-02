@@ -1,0 +1,60 @@
+{
+  "model_name": "REG",
+  "custom_objective": "mse_builtin",
+  "n_select_features": 5,
+  "n_runs": 1,
+  "targets": [
+    "GLU (mg/dL)"
+  ],
+  "full_feats": [
+    "food_TKCAL",
+    "food_WHOLEFRT",
+    "food_MONOPOLY",
+    "food_ALLMEAT",
+    "food_SEAPLANT",
+    "food_ADDSUGC",
+    "food_SOLFATC",
+    "food_TALCO",
+    "food_T_F_TOTAL",
+    "food_T_G_WHOLE",
+    "food_T_D_TOTAL",
+    "food_TSFAT",
+    "food_TSODI",
+    "food_T_G_REFINED",
+    "food_EMPTYCAL10",
+    "food_T_V_TOTAL",
+    "food_T_V_DRKGR",
+    "food_T_V_LEGUMES",
+    "age",
+    "stress_index",
+    "fatigue_index",
+    "mean_hrt",
+    "weight",
+    "height"
+  ],
+  "results": {
+    "GLU (mg/dL)": {
+      "selected_features": [
+        "mean_hrt",
+        "food_ADDSUGC",
+        "age",
+        "food_T_V_TOTAL",
+        "food_ALLMEAT"
+      ],
+      "train_var_ratio_history": [
+        0.98237152965167,
+        0.9381777934978733,
+        0.9168014580556318,
+        0.9048898793980997,
+        0.9026835622721797
+      ],
+      "test_var_ratio_history": [
+        0.924771174871497,
+        0.8840674099998683,
+        0.8453268144138203,
+        0.8207254288389964,
+        0.8133872007363357
+      ]
+    }
+  }
+}
