@@ -2,22 +2,30 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY_BIN="${PY_BIN:-${ROOT_DIR}/.venv/bin/python}"
-if [[ ! -x "${PY_BIN}" ]]; then
-  PY_BIN="$(command -v python3)"
-fi
+PY_BIN_DEFAULT="${ROOT_DIR}/.venv/bin/python"
+RESULTS_DIR_DEFAULT="${ROOT_DIR}/reports/results"
+FIG_DIR_DEFAULT="${ROOT_DIR}/reports/figures"
 
-RESULTS_DIR="${RESULTS_DIR:-${ROOT_DIR}/reports/results}"
-FIG_DIR="${FIG_DIR:-${ROOT_DIR}/reports/figures}"
-N_SELECT_FEATURES="${N_SELECT_FEATURES:-5}"
+resolve_python() {
+  local py_bin="${PY_BIN:-$PY_BIN_DEFAULT}"
+  if [[ ! -x "${py_bin}" ]]; then
+    py_bin="$(command -v python3)"
+  fi
+  echo "${py_bin}"
+}
 
-mkdir -p "${FIG_DIR}"
+run_plot() {
+  local py_bin="$1"
+  local results_dir="${RESULTS_DIR:-$RESULTS_DIR_DEFAULT}"
+  local fig_dir="${FIG_DIR:-$FIG_DIR_DEFAULT}"
+  local n_select_features="${N_SELECT_FEATURES:-5}"
+  mkdir -p "${fig_dir}"
 
-PYTHONPATH="${ROOT_DIR}/src" \
-RESULTS_DIR="${RESULTS_DIR}" \
-FIG_DIR="${FIG_DIR}" \
-N_SELECT_FEATURES="${N_SELECT_FEATURES}" \
-"${PY_BIN}" - <<'PY'
+  PYTHONPATH="${ROOT_DIR}/src" \
+  RESULTS_DIR="${results_dir}" \
+  FIG_DIR="${fig_dir}" \
+  N_SELECT_FEATURES="${n_select_features}" \
+  "${py_bin}" - <<'PY'
 from __future__ import annotations
 
 import json
@@ -117,3 +125,12 @@ plt.savefig(out, dpi=300, bbox_inches="tight")
 plt.close(fig)
 print(f"[OK] Figure saved: {out}")
 PY
+}
+
+main() {
+  local py_bin
+  py_bin="$(resolve_python)"
+  run_plot "${py_bin}"
+}
+
+main "$@"

@@ -3,6 +3,7 @@ from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+import os
 import numpy as np
 import pandas as pd
 
@@ -231,7 +232,8 @@ def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_co
                     max_depth=3,
                     learning_rate=0.1,
                     random_state=42,
-                    # tree_method="hist",
+                    n_jobs=int(os.environ.get("XGB_N_JOBS", "1")),
+                    tree_method=os.environ.get("XGB_TREE_METHOD", "hist"),
                     base_score=y_train.mean(),
                     objective=custom_obj
                 )

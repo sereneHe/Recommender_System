@@ -1,0 +1,95 @@
+<mxfile host="app.diagrams.net" modified="2026-02-11T00:00:00.000Z" agent="Codex" version="22.1.0">
+  <diagram id="mark-ori-flow" name="mark-ori-dataflow">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="mark-ori Data Processing and Recommendation Flow" style="text;html=1;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="20" width="1160" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s1" value="Intake24 Raw&#xa;processed_fped.csv&#xa;processed_diet.csv" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="280" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2" value="Biosensors / Clinical Raw&#xa;body_comp, blood_data,&#xa;energy_expenditure, blood_pressure" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="360" y="100" width="330" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3" value="Omics Raw&#xa;microbiome, scafs, ms_serum/ms_urine,&#xa;nmr_urine, lipidomics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="730" y="100" width="330" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="c1" value="data_load.ipynb&#xa;hei() + ID/VISIT parse&#xa;food_* rename -> hei.pkl" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="60" y="250" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="c2" value="data_load.ipynb&#xa;cleaned_loader()&#xa;ID/VISIT unify&#xa;high-missing cols drop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="380" y="250" width="290" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="c3" value="Columns Mapping&#xa;site_mapping + prefixed spaces&#xa;scafs_/ms_/nmr_/lip_" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="730" y="250" width="260" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="m1" value="build_prep_data.ipynb&#xa;average_visits()&#xa;patient-level aggregation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="180" y="420" width="280" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="m2" value="Inner merge on ID&#xa;-> prep_data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="500" y="420" width="220" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3" value="Derived features&#xa;site_continental&#xa;normed_TEE&#xa;normed_food_*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="760" y="420" width="220" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="f1" value="Optional PCA&#xa;ms_serum/ms_urine/nmr_urine&#xa;ms_lip/dbs_rbc_lip -> *.pca_k" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="420" width="280" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="f2" value="Feature Space&#xa;base_feats + food_feats + non_food_feats" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1360" y="420" width="300" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="sel1" value="compute_tools.ipynb&#xa;compute_predictor_errors()&#xa;Var Reduction = 1 - test_error" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="360" y="580" width="310" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="sel2" value="incremental_feature_selection.ipynb&#xa;run_feature_selection()&#xa;Greedy forward incremental selection" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="710" y="580" width="340" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n1" value="NCD branch&#xa;NCD_analysis_incremental_features.ipynb&#xa;NCD_analysis_food_and_conditioning.ipynb" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="180" y="760" width="360" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="n2" value="Outputs&#xa;pkl_outs/NCD_analysis_incremental_*.pkl&#xa;plots: ncd_risk_incremental_5feat.png" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="570" y="760" width="340" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i1" value="Intake branch&#xa;intake_model_incremantal_features.ipynb&#xa;intake_analysis_plot_results_v2.ipynb" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="950" y="760" width="360" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="i2" value="Outputs&#xa;pkl_outs/intake_model_incremental_*.pkl" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="760" width="280" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="r1" value="Recommendation Core&#xa;NCD: what to improve&#xa;+ intake/conditioning: how to realize&#xa;-> ranked food interventions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="940" width="520" height="120" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="s1" target="c1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="s2" target="c2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="s3" target="c2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="c2" target="c3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="c1" target="m1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="c2" target="m1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="m1" target="m2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="m2" target="m3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="m3" target="f1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="f1" target="f2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="f2" target="sel1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="sel1" target="sel2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="sel2" target="n1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="n1" target="n2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="sel2" target="i1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="i1" target="i2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="n2" target="r1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="i2" target="r1"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

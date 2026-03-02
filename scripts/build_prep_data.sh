@@ -2,15 +2,23 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY_BIN="${PY_BIN:-${ROOT_DIR}/.venv/bin/python}"
-if [[ ! -x "${PY_BIN}" ]]; then
-  PY_BIN="$(command -v python3)"
-fi
+PY_BIN_DEFAULT="${ROOT_DIR}/.venv/bin/python"
+OUT_DIR_DEFAULT="${ROOT_DIR}/data/processed"
 
-OUT_DIR="${OUT_DIR:-${ROOT_DIR}/data/processed}"
-mkdir -p "${OUT_DIR}"
+resolve_python() {
+  local py_bin="${PY_BIN:-$PY_BIN_DEFAULT}"
+  if [[ ! -x "${py_bin}" ]]; then
+    py_bin="$(command -v python3)"
+  fi
+  echo "${py_bin}"
+}
 
-PYTHONPATH="${ROOT_DIR}/src" "${PY_BIN}" - <<'PY'
+run_build_prep_data() {
+  local py_bin="$1"
+  local out_dir="${OUT_DIR:-$OUT_DIR_DEFAULT}"
+  mkdir -p "${out_dir}"
+
+  PYTHONPATH="${ROOT_DIR}/src" OUT_DIR="${out_dir}" "${py_bin}" - <<'PY'
 from __future__ import annotations
 import json
 import os
@@ -36,3 +44,12 @@ print(f"[OK] prep_data: {prep_path} shape={prep_data.shape}")
 print(f"[OK] food_feats: {food_path} n={len(food_feats)}")
 print(f"[OK] non_food_feats: {non_food_path} n={len(non_food_feats)}")
 PY
+}
+
+main() {
+  local py_bin
+  py_bin="$(resolve_python)"
+  run_build_prep_data "${py_bin}"
+}
+
+main "$@"
