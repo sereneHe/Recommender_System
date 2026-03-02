@@ -28,7 +28,7 @@ callback_mode: all_cycles # shortest_cycle
 robust: false
 tabu_edges: false
 weights_bound: 1.0
-time_limit: 300
+time_limit: 1800
 target_mip_gap: 0.0001
 
 
