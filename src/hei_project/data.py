@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import zipfile
 from pathlib import Path
@@ -24,7 +25,12 @@ def resolve_assets_from_cfg(cfg: DictConfig) -> Dict[str, Path]:
       assets.w_est_inner_csv
       assets.intra_nodes_txt
     """
-    assets_dir = Path(os.environ.get("ASSETS_DIR", str(cfg.paths.assets_dir))).expanduser().resolve()
+    project_root = Path(__file__).resolve().parents[2]
+    assets_dir = Path(os.environ.get("ASSETS_DIR", str(cfg.paths.assets_dir))).expanduser()
+    if not assets_dir.is_absolute():
+        assets_dir = (project_root / assets_dir).resolve()
+    else:
+        assets_dir = assets_dir.resolve()
 
     w_est_zip = assets_dir / str(cfg.assets.w_est_zip)
     intra_nodes = assets_dir / str(cfg.assets.intra_nodes_txt)
@@ -48,7 +54,11 @@ def load_intra_nodes(path: Path) -> List[str]:
     if not path.exists():
         raise FileNotFoundError(f"intra_nodes file not found: {path}")
     s = path.read_text(encoding="utf-8").strip()
-    return [x.strip() for x in s.strip("[]").split(",") if x.strip()]
+    try:
+        parsed = json.loads(s)
+    except json.JSONDecodeError:
+        parsed = [x.strip().strip("'").strip('"') for x in s.strip("[]").split(",") if x.strip()]
+    return [str(x).strip() for x in parsed if str(x).strip()]
 
 
 def load_cfg(config_path: str | Path = "src/project_hei/configs/config.yaml") -> DictConfig:

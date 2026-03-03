@@ -7,7 +7,7 @@ This guide is for users who only need to install, run, and view result figures.
 Run in terminal:
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -16,7 +16,7 @@ pip install -r requirements.txt
 If you use `uv`:
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 uv sync
 ```
 
@@ -55,7 +55,7 @@ Important files (examples):
 ## 4) Run Data Prep + Analysis + Plotting
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 chmod +x scripts/*.sh
 ./scripts/build_prep_data.sh
 SEEDS='13042,95863' ./scripts/NCD_analysis_food_and_conditioning.sh
@@ -72,7 +72,7 @@ SEEDS='13042,95863' ./scripts/NCD_analysis_food_and_conditioning.sh
 ## 6) Start API (Optional)
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 source .venv/bin/activate
 api
 ```

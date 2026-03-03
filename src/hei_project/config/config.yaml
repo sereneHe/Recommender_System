@@ -1,5 +1,5 @@
 paths:
-  assets_dir: ../../data
+  assets_dir: data
 
 assets:
   w_est_zip: W_est.csv.zip

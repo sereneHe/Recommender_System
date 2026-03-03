@@ -120,6 +120,10 @@ def percentile_mask(Y, outlier_percentile):
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF
 try:
     from xgboost import XGBRegressor
 except Exception:  # pragma: no cover
@@ -251,6 +255,61 @@ def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_co
             ]
         }
         #model_name = 'REG'
+    elif model_name == 'DT':
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("dt", DecisionTreeRegressor(
+                    random_state=42,
+                    max_depth=5,
+                    min_samples_leaf=5
+                ))
+            ]
+        }
+    elif model_name == 'RF':
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("rf", RandomForestRegressor(
+                    n_estimators=100,
+                    max_depth=8,
+                    min_samples_leaf=3,
+                    random_state=42,
+                    n_jobs=int(os.environ.get("RF_N_JOBS", "1"))
+                ))
+            ]
+        }
+    elif model_name == 'KerREG':
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("kerreg", KernelRidge(
+                    alpha=1.0,
+                    kernel="rbf",
+                    gamma=None
+                ))
+            ]
+        }
+    elif model_name == 'GP':
+        model_class = Pipeline
+        model_params = {
+            'steps': [
+                ("scale", StandardScaler()),
+                ("gp", GaussianProcessRegressor(
+                    kernel=RBF(length_scale=1.0),
+                    alpha=1e-6,
+                    normalize_y=True
+                ))
+            ]
+        }
+    else:
+        raise ValueError(
+            f"Unsupported model_name={model_name!r}. "
+            "Supported: REG, DT, RF, KerREG, GP, XGB"
+        )
 
 
     rf_model = model_class(**model_params)
@@ -295,14 +354,17 @@ def compute_predictor_errors(prep_data, hei_feats, target_col, w_est, row_and_co
         print(f'test covs: {test_covs_res}')
 
         # if False:
-        feature_importance = rf_model.feature_importances_
-        print(f"\nTop 5 Most Important Features:")
-        # Assuming X is a DataFrame with column names, otherwise use indices
-        feature_names = hei_feats
-        importance_pairs = list(zip(feature_names, feature_importance))
-        importance_pairs.sort(key=lambda x: x[1], reverse=True)
-        for i, (feature, importance) in enumerate(importance_pairs[:5]):
-            print(f"{i + 1}. {feature}: {importance:.4f}")
+        model_for_importance = rf_model
+        if hasattr(rf_model, "named_steps") and rf_model.named_steps:
+            model_for_importance = list(rf_model.named_steps.values())[-1]
+        if hasattr(model_for_importance, "feature_importances_"):
+            feature_importance = model_for_importance.feature_importances_
+            print(f"\nTop 5 Most Important Features:")
+            feature_names = hei_feats
+            importance_pairs = list(zip(feature_names, feature_importance))
+            importance_pairs.sort(key=lambda x: x[1], reverse=True)
+            for i, (feature, importance) in enumerate(importance_pairs[:5]):
+                print(f"{i + 1}. {feature}: {importance:.4f}")
 
     if do_print:
         print('\n ---------------------- \n')

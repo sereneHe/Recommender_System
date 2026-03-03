@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 import zipfile
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -30,7 +31,21 @@ def _load_intra_nodes(path: Path) -> List[str]:
     if not path.exists():
         raise FileNotFoundError(f"intra_nodes file not found: {path}")
     s = path.read_text(encoding="utf-8").strip()
-    return [x.strip() for x in s.strip("[]").split(",") if x.strip()]
+    try:
+        parsed = json.loads(s)
+    except json.JSONDecodeError:
+        parsed = [x.strip().strip("'").strip('"') for x in s.strip("[]").split(",") if x.strip()]
+    return [str(x).strip() for x in parsed if str(x).strip()]
+
+
+def _resolve_tracking_uri(cfg: DictConfig, project_root: Path) -> str:
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    cfg_uri = str(getattr(cfg.mlflow, "tracking_uri", "") or "")
+    if env_uri:
+        return env_uri
+    if cfg_uri:
+        return cfg_uri
+    return (project_root / "mlruns").resolve().as_uri()
 
 
 @hydra.main(
@@ -40,16 +55,14 @@ def _load_intra_nodes(path: Path) -> List[str]:
 )
 def train(cfg: DictConfig) -> None:
     logger.info("Hydra config:\n{}", OmegaConf.to_yaml(cfg))
+    project_root = Path(__file__).resolve().parents[2]
 
     # ------------------
     # MLflow setup
     # ------------------
-    tracking_uri = (
-        os.environ.get("MLFLOW_TRACKING_URI")
-        or cfg.mlflow.tracking_uri
-    )
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
+    tracking_uri = _resolve_tracking_uri(cfg, project_root)
+    mlflow.set_tracking_uri(tracking_uri)
+    logger.info("Using MLflow tracking URI: {}", tracking_uri)
 
     mlflow.set_experiment(cfg.mlflow.experiment_name)
 
@@ -61,7 +74,6 @@ def train(cfg: DictConfig) -> None:
     # ------------------
     # Load assets
     # ------------------
-    project_root = Path(__file__).resolve().parents[2]
     assets_dir = Path(os.environ.get("ASSETS_DIR", str(cfg.paths.assets_dir)))
     if not assets_dir.is_absolute():
         assets_dir = (project_root / assets_dir).resolve()

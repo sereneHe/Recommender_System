@@ -5,8 +5,8 @@ This guide is for contributors who maintain and extend the open-source codebase.
 ## 1) Get the Code
 
 ```bash
-git clone https://github.com/sereneHe/Recommender_System2.git
-cd Recommender_System2
+git clone https://github.com/sereneHe/Recommender_System.git
+cd Recommender_System
 ```
 
 Create a feature branch:
@@ -45,7 +45,7 @@ uv sync --all-groups
 Train (default config):
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 source .venv/bin/activate
 train
 ```
@@ -53,7 +53,7 @@ train
 Train (override parameters):
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 source .venv/bin/activate
 train solver.model_name=XGB solver.custom_objective=mse_builtin solver.n_runs=1 solver.n_select_features=5 'targets.columns=["GLU (mg/dL)"]'
 ```
@@ -61,7 +61,7 @@ train solver.model_name=XGB solver.custom_objective=mse_builtin solver.n_runs=1 
 API:
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 source .venv/bin/activate
 api
 ```
@@ -71,7 +71,7 @@ api
 Run all tests:
 
 ```bash
-cd /Users/xiaoyuhe/Recommender_System2
+cd /Users/xiaoyuhe/Recommender_System
 source .venv/bin/activate
 pytest -q
 ```

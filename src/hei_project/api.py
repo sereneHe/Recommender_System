@@ -53,7 +53,12 @@ def _resolve_assets(cfg: DictConfig) -> Dict[str, Path]:
     Resolve assets with env override:
       ASSETS_DIR overrides cfg.paths.assets_dir if present.
     """
-    assets_dir = Path(os.environ.get("ASSETS_DIR", str(getattr(cfg.paths, "assets_dir", ASSETS_DIR)))).resolve()
+    project_root = Path(__file__).resolve().parents[2]
+    assets_dir = Path(os.environ.get("ASSETS_DIR", str(getattr(cfg.paths, "assets_dir", ASSETS_DIR))))
+    if not assets_dir.is_absolute():
+        assets_dir = (project_root / assets_dir).resolve()
+    else:
+        assets_dir = assets_dir.resolve()
     w_est_zip = assets_dir / str(getattr(cfg.assets, "w_est_zip", DEFAULT_W_EST_ZIP))
     intra_nodes = assets_dir / str(getattr(cfg.assets, "intra_nodes_txt", DEFAULT_INTRA_NODES))
     inner_csv = str(getattr(cfg.assets, "w_est_inner_csv", DEFAULT_W_EST_INNER))
@@ -79,7 +84,11 @@ def _load_intra_nodes(path: Path) -> List[str]:
     if not path.exists():
         raise FileNotFoundError(f"intra_nodes file not found: {path}")
     s = path.read_text(encoding="utf-8").strip()
-    return [x.strip() for x in s.strip("[]").split(",") if x.strip()]
+    try:
+        parsed = json.loads(s)
+    except json.JSONDecodeError:
+        parsed = [x.strip().strip("'").strip('"') for x in s.strip("[]").split(",") if x.strip()]
+    return [str(x).strip() for x in parsed if str(x).strip()]
 
 
 def _safe_target_name(target: str) -> str:
@@ -93,6 +102,17 @@ def _safe_target_name(target: str) -> str:
     )
 
 
+def _resolve_tracking_uri(cfg: DictConfig) -> str:
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    cfg_uri = str(getattr(cfg.mlflow, "tracking_uri", "") or "")
+    if env_uri:
+        return env_uri
+    if cfg_uri:
+        return cfg_uri
+    project_root = Path(__file__).resolve().parents[2]
+    return (project_root / "mlruns").resolve().as_uri()
+
+
 # -------------------------
 # Lifespan: load cfg/data/assets once
 # -------------------------
@@ -104,9 +124,9 @@ async def lifespan(app: FastAPI):
         logger.info(f"Loaded config from {CONFIG_PATH}")
 
         # MLflow setup (optional)
-        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI") or str(getattr(cfg.mlflow, "tracking_uri", "") or "")
-        if tracking_uri:
-            mlflow.set_tracking_uri(tracking_uri)
+        tracking_uri = _resolve_tracking_uri(cfg)
+        mlflow.set_tracking_uri(tracking_uri)
+        logger.info(f"Using MLflow tracking URI: {tracking_uri}")
         mlflow.set_experiment(str(getattr(cfg.mlflow, "experiment_name", "codiet_recommender")))
 
         # Load data from HEI pipeline
@@ -184,7 +204,7 @@ async def recommend_json(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="Service not ready.")
 
     cfg: DictConfig = app.state.cfg
-    cfg2 = OmegaConf.copy(cfg)
+    cfg2 = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
 
     # Apply overrides
     targets = payload.get("targets", None)

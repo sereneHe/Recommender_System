@@ -1,9 +1,8 @@
-import pytest
-
-pytestmark = pytest.mark.asyncio
+from hei_project import api
 
 
-async def test_health(api_client):
-    r = await api_client.get("/health")
-    assert r.status_code == 200 # 200 = OK!
-    assert r.json() == {"status": "healthy"}
+def test_health_returns_current_status_payload(api_app):
+    body = api.health_check()
+    assert body["status"] == "healthy"
+    assert body["loaded"] is True
+    assert "assets" in body
