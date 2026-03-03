@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import zipfile
 import json
@@ -46,6 +47,12 @@ def _resolve_tracking_uri(cfg: DictConfig, project_root: Path) -> str:
     if cfg_uri:
         return cfg_uri
     return (project_root / "mlruns").resolve().as_uri()
+
+
+def _sanitize_mlflow_name(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9_./ :\-]", "_", value)
+    sanitized = re.sub(r"_+", "_", sanitized).strip("_. ")
+    return sanitized or "metric"
 
 
 @hydra.main(
@@ -127,7 +134,9 @@ def train(cfg: DictConfig) -> None:
         mlflow.log_metric("runtime_seconds", time.time() - start)
 
         for target, (feats, train_errs, test_errs) in result.items():
-            safe = target.replace(" ", "_").replace("(", "").replace(")", "")
+            safe = _sanitize_mlflow_name(
+                target.replace(" ", "_").replace("(", "").replace(")", "")
+            )
             mlflow.log_text(
                 "[" + ", ".join(feats) + "]",
                 f"{safe}_selected_features.txt",
