@@ -39,12 +39,12 @@ def start_experiment(cfg: DictConfig) -> None:
         log_system_info(HydraConfig.get())
 
         food_feats, non_food_feats, prep_data = load_all_data()
-        with zipfile.ZipFile("./data/W_est.csv.zip") as z:
+        with zipfile.ZipFile("./data/raw/W_est.csv.zip") as z:
             with z.open("W_est.csv") as f:
                 w_est = np.loadtxt(f, delimiter=",")
-            # w_est = np.loadtxt("./data/W_est.csv", delimiter=",")
-        mlflow.log_artifact("./data/W_est.csv.zip")
-        s = Path('./data/intra_nodes.txt').read_text(encoding="utf-8").strip()
+            # w_est = np.loadtxt("./data/raw/W_est.csv", delimiter=",")
+        mlflow.log_artifact("./data/raw/W_est.csv.zip")
+        s = Path('./data/raw/intra_nodes.txt').read_text(encoding="utf-8").strip()
         mlflow.log_text(s, 'intra_nodes.txt')
         row_and_col_names = ast.literal_eval(s) #[x.strip() for x in s.strip("[]").split(",")]
 

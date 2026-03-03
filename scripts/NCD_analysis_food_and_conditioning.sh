@@ -57,8 +57,8 @@ food_feats = json.loads((processed_dir / "food_feats.json").read_text(encoding="
 non_food_feats = json.loads((processed_dir / "non_food_feats.json").read_text(encoding="utf-8"))
 
 root_dir = processed_dir.parents[1]
-zip_path = root_dir / "data" / "W_est.csv.zip"
-intra_path = root_dir / "data" / "intra_nodes.txt"
+zip_path = root_dir / "data" / "raw" / "W_est.csv.zip"
+intra_path = root_dir / "data" / "raw" / "intra_nodes.txt"
 
 with zipfile.ZipFile(zip_path) as z:
     with z.open("W_est.csv") as f:

@@ -179,7 +179,6 @@ mlruns/
 mlflow.db
 
 # Data and training artifacts (generated)
-data/raw/
 models/*
 !models/*.dvc
 !models/*.gitkeep
