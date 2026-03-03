@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 import os
 import re
 import time
@@ -55,6 +56,39 @@ def _sanitize_mlflow_name(value: str) -> str:
     return sanitized or "metric"
 
 
+def _sanitize_file_name(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9_.\-]", "_", value)
+    sanitized = re.sub(r"_+", "_", sanitized).strip("_. ")
+    return sanitized or "artifact"
+
+
+def _export_result_pickle(
+    result: Dict[str, Any],
+    cfg: DictConfig,
+    project_root: Path,
+    run_id: str,
+) -> Path:
+    pkl_dir = Path(os.environ.get("PKL_OUT_DIR", str(project_root / "pkl_outs"))).expanduser()
+    if not pkl_dir.is_absolute():
+        pkl_dir = (project_root / pkl_dir).resolve()
+    pkl_dir.mkdir(parents=True, exist_ok=True)
+
+    target_part = "__".join(_sanitize_file_name(t) for t in cfg.targets.columns)
+    file_name = (
+        f"NCD_analysis_incremental_feat_{cfg.solver.model_name}"
+        f"_lipids_True"
+        f"_maxfeat_{cfg.solver.n_select_features}"
+        f"_permute_False"
+        f"_nruns_{cfg.solver.n_runs}"
+        f"_{target_part}"
+        f"_{run_id}.pkl"
+    )
+    out_path = pkl_dir / file_name
+    with out_path.open("wb") as f:
+        pickle.dump(result, f)
+    return out_path
+
+
 @hydra.main(
     version_base=None,
     config_path="config",
@@ -106,6 +140,7 @@ def train(cfg: DictConfig) -> None:
     run_name = f"{cfg.solver.model_name}_{cfg.solver.custom_objective}"
 
     with mlflow.start_run(run_name=run_name):
+        run_id = mlflow.active_run().info.run_id
         mlflow.log_params(
             {
                 "model_name": cfg.solver.model_name,
@@ -132,6 +167,9 @@ def train(cfg: DictConfig) -> None:
             cfg=cfg,
         )
         mlflow.log_metric("runtime_seconds", time.time() - start)
+        pkl_path = _export_result_pickle(result, cfg, project_root, run_id)
+        mlflow.log_artifact(str(pkl_path), artifact_path="pkl_outs")
+        logger.info("Exported result curves to {}", pkl_path)
 
         for target, (feats, train_errs, test_errs) in result.items():
             safe = _sanitize_mlflow_name(

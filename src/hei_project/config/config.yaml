@@ -9,8 +9,8 @@ assets:
 solver:
   model_name: XGB
   custom_objective: lagrange
-  n_select_features: 5
-  n_runs: 40
+  n_select_features: 2
+  n_runs: 150
 
 targets:
   columns: ["GLU (mg/dL)"]
