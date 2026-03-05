@@ -32,7 +32,7 @@ time_limit: 1800
 target_mip_gap: 0.0001
 
 
-data_path: '../codiet_data/'
+data_path: './data/' #'../codiet_data/'
 knowledge_graph_filename: 'knowledge_graph_intersection.graphml'
 
 # debugging

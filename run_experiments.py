@@ -54,6 +54,10 @@ def start_experiment(cfg: DictConfig) -> None:
         start_time = time.time()
         target_feat = cfg.problem.target
         full_feats = cfg.problem.features
+        if 'N_SELECT_FEATURES' in cfg.solver:
+            n_select_features = cfg.solver.N_SELECT_FEATURES
+        else:
+            n_select_features = len(full_feats)
         current_column_names = list(prep_data.columns)  # food_feats + non_food_feats
         mlflow.log_text('[' + ", ".join(current_column_names) + "]", "data_feats_list.txt")
         curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs, w_est = run_feature_selection_scikit(
@@ -62,7 +66,7 @@ def start_experiment(cfg: DictConfig) -> None:
             cfg.solver.custom_objective,
             target_feat,
             w_est, row_and_col_names,
-            cfg.solver.n_runs, cfg.solver.N_SELECT_FEATURES,
+            cfg.solver.n_runs, n_select_features,
             full_feats,
             solver_cfg=cfg.solver,
             model_factory=None,
