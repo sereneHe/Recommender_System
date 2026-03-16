@@ -4,10 +4,11 @@ import logging
 from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import cross_validate
+import torch
+
 
 from compute_tools import compute_predictor_errors
-from recomender_humancompatible import HCRecommenderPredictor
-from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, compute_predictor_errors_scikit
+from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, HCRecommenderPredictor, compute_predictor_errors_scikit
 
 
 def get_mean_average_errors(prep_data, run_feats, target_col, w_est, row_and_col_names,
@@ -109,6 +110,7 @@ def create_model(model_name, w_est, target_col, row_and_col_names, custom_object
     elif model_name == "REG":
         model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
     elif model_name == "HC":
+        torch.manual_seed(42)
         model = HCRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective,
                                        prep_data, solver_cfg)
     if model is None:
@@ -140,7 +142,6 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     y = prep_data[target_col]
 
     score_normalizer = mean_squared_error(y, np.ones_like(y) * y.mean())
-
     #TODO this deletes only 30 columns out of 508, so I will do this so that scikit feature selection works (no nas)
     #prep_data = prep_data[full_feats]
     prep_data = prep_data.dropna(axis=1)
@@ -172,15 +173,13 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
         X_selected = X.iloc[:, selected_indices]
         X_selected = X_selected.to_numpy() # CV did not work with pandas data frame, IDKW
-        w_est = None
+        w_est = model._w_est
+        
     else:
         model.fit(X, y)
         X_selected = X.to_numpy()
         best_features = full_feats
         w_est = model._w_est
-
-
-
 
     results = cross_validate(model, X_selected, y,
         cv=n_runs,
@@ -188,6 +187,11 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         return_train_score=True
     )
 
+    if model_name == 'HC':
+        # add fit call to get the graph for selected features
+        model.fit(X_selected, y)
+        w_est = model._w_est
+        torch.save(model._rf_model_.state_dict(), "model.pt")
     test_mse = results["test_score"].mean() / score_normalizer
     train_mse = results["train_score"].mean() / score_normalizer
 
