@@ -11,12 +11,16 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 
+from nn_lagrangian import fit_aug_lagrangian_nn_constraint
 import solve_milp
 from compute_tools import percentile_mask
 from xgboost_lagrangian import fit_aug_lagrangian_W_constraint
 from xgboost import XGBRegressor
 
+import torch
 
+
+@torch.no_grad
 def compute_predictor_errors_scikit(estimator, X, y):
     test_mse = mean_squared_error(y, estimator.predict(X))
     #test_bench = mean_squared_error(y, np.ones_like(y) * estimator._y_train_mean_)
@@ -158,6 +162,75 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
         if self._y_normalized:
             prediction = prediction * self._y_std + self._y_mean
         return prediction
+
+
+
+
+
+class HCRecommenderPredictor(RecommenderBaseEstimator):
+    def get_current_column_names(self, X):
+        current_feature_names = []
+
+        for i in range(X.shape[1]):
+            col_data = X[:, i]
+            for col_name in self.prep_data.columns:
+                if col_name in current_feature_names:
+                    continue
+                it = iter(self.prep_data[col_name])
+                if all(any(a == b for a in it) for b in col_data):
+                    current_feature_names.append(col_name)
+                    break
+
+        return current_feature_names
+
+    def fit(self, X, y=None):
+        _, X, y = self.preprocess_data(X, y)
+    # self._y_train_mean_ = y.mean()
+        self.scaler_ = StandardScaler()
+        X = self.scaler_.fit_transform(X)
+
+        if self.cfg.recalculate_dag:
+            d = X.shape[1] + 1 # adding one for y
+            X_y = np.column_stack((X, y.to_numpy()))
+            # if d <= 2:
+            #     w_est = np.zeros((d,d))
+            # else:
+            # print("max X", X.max(), "min X", X.min())
+            current_column_names = self.get_current_column_names(X)
+            G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
+            # print(G.nodes())
+            # print(current_column_names + [self.target_col])
+            H = G.subgraph(current_column_names + [self.target_col]).copy()
+            if H.number_of_nodes() > 0:
+                print('not emty')
+            H = nx.complement(H)
+            col_to_idx = {col: idx for idx, col in enumerate(current_column_names + [self.target_col])}
+            tabu_edges = list((col_to_idx[s],col_to_idx[e]) for (s,e) in H.edges())
+            # if tabu_edges:
+            #     print(tabu_edges)
+            w_est, _, _, _, _ = solve_milp.solve(X_y, self.cfg, self.cfg.nonzero_threshold,
+                                                                    Y=[],
+                                                                    B_ref=np.zeros((d,d)),
+                                                                    tabu_edges=tabu_edges )
+            self._w_est = w_est
+
+        else:
+            row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
+            idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+            predict_idx = row_and_col_names_indices[self.target_col]
+            w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+                
+        self._rf_model_, lam = fit_aug_lagrangian_nn_constraint(X, y, w_est, self.cfg)
+        
+
+    def predict(self, X):
+        if self.custom_objective == 'lagrange':
+            X = self.scaler_.transform(X)
+            return self._rf_model_.predict(X)
+        else:
+            return super().predict(X)
+
+
 
 
 class REGRecommenderPredictor(RecommenderBaseEstimator):
