@@ -1,3 +1,7 @@
 outputs
 .idea
 *.backup
+__pycache__
+mlruns
+mlflow.db
+data/energy_expenditure
