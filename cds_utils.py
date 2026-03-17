@@ -57,7 +57,7 @@ def load_data(n, granularity, p, data_path):
         Y.append(Y_i)
 
     tabu_edges = generate_tabu_edges(intra_nodes)
-    return W_true, W_true, A_true, X, Y, intra_nodes, inter_nodes, tabu_edges
+    return result_df.iloc[:n,:]
 
 
 def generate_tabu_edges(intra_nodes):

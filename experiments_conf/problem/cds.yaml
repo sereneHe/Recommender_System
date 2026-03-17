@@ -3,12 +3,12 @@ seed: 1
 n: 1000
 p: 0
 granularity: 1
-data_path: '../../data/CDS_Data'
+data_path: 'data/CDS_Data'
 normalize: False
 target: '48DGFE'
 
 features:
-        - 48DGFE # ing bank
+        #- 48DGFE # ing bank
         - 05ABBF # BNP Paribas
         - 8B69AP # Société Générale
         - 06DABK # Barclays
