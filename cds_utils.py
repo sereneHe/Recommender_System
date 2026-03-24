@@ -24,7 +24,7 @@ def create_adj_matrix(vertices, edges):
 def load_data(n, granularity, p, data_path):
     from os import listdir
     from os.path import isfile, join
-    data_files = [f for f in listdir(data_path) if isfile(join(data_path, f)) and f.endswith('.csv')]
+    data_files = [f for f in listdir(data_path) if isfile(join(data_path, f)) and f.endswith('.csv') and f.startswith('CR_CDS_')]
     data = [pd.read_table(join(data_path, file), sep=',',index_col=0) for file in data_files]
     data_names = [file.split('_')[3] for file in data_files]
 
