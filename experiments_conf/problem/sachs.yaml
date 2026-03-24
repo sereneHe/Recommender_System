@@ -1,0 +1,21 @@
+name: Sachs
+seed: 1
+variant: 1
+normalize: false
+data_path: 'data/sachs/data_files'
+
+target: 'Raf'
+
+features:
+  #- Raf # Phosphorylation at S259
+  - Mek
+  - Plcg
+  - PIP2
+  - PIP3
+  - Erk
+  - Akt
+  - PKA
+  - PKC
+  - P38
+  - Jnk
+

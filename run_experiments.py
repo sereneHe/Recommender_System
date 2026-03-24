@@ -50,16 +50,18 @@ def start_experiment(cfg: DictConfig) -> None:
             s = Path('./data/intra_nodes.txt').read_text(encoding="utf-8").strip()
             mlflow.log_text(s, 'intra_nodes.txt')
             row_and_col_names = ast.literal_eval(s) #[x.strip() for x in s.strip("[]").split(",")]
+
         if cfg.problem.name == "cds":
             from cds_utils import load_data
+        if cfg.problem.name == 'Sachs':
+            from sachs_utils import load_data
+        if cfg.problem.name in ["cds", "Sachs"]:
             prep_data = load_data(cfg.problem.n, cfg.problem.granularity, cfg.problem.p, cfg.problem.data_path)
             with zipfile.ZipFile(join(cfg.problem.data_path, "W_est.csv.zip")) as z:
-                with z.open("W_est_cds.csv") as f:
+                with z.open(f"W_est_{cfg.problem.name}.csv") as f:
                     w_est = np.loadtxt(f, delimiter=",")
             mlflow.log_artifact(join(cfg.problem.data_path, "W_est.csv.zip"))
             row_and_col_names = prep_data.columns
-            print(w_est)
-            print(prep_data)
 
         print(row_and_col_names)
         start_time = time.time()

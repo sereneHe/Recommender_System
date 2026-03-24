@@ -43,7 +43,7 @@ def load_data(n, granularity, p, data_path):
     intra_nodes = [f'{v}_lag0' for v in variables]
     W_true = np.zeros((len(variables), len(variables))) # TODO: get the ground truth
     X = result_df.iloc[:n,:].to_numpy(copy=True)
-    X = 1000 * X
+    X = 1000 * X  # TODO: this cause bad performance - West is with 1000*X, here without, if so, fix!
     inter_nodes = []
     A_true = []
     Y = []
