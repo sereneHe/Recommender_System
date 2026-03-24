@@ -5,5 +5,5 @@ export PYTHONPATH=$PYTHONPATH:../
 CMD="python3 run_experiments.py --multirun --config-name=config-cluster"
 
 
-${CMD} experiment="CDS_RECOMMENDER" solver="mark_with_cc, mark" problem=cds problem.target="05ABBF, 8B69AP, 06DABK, EFAGG9, 2H6677, FH49GG, 8D8575, GG6EBT, DD359M, FF667M, 0H99B7, 2H66B7, 8A87AG, NN2A8G, 6A516F"
+${CMD} experiment="CDS_RECOMMENDER" solver="mark_with_cc, mark" problem="cds_05abbf, cds_8b69ap, cds_06dabk, cds_efagg9, cds_2h6677, cds_fh49gg, cds_8d8575, cds_gg6ebt, cds_dd359m, cds_ff667m, cds_0h99b7, cds_2h66b7, cds_8a87ag, cds_nn2a8g, cds_6a516f"
 
