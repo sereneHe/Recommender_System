@@ -1,0 +1,26 @@
+name: cds
+seed: 1
+n: 1000
+p: 0
+granularity: 1
+data_path: 'data/CDS_Data'
+normalize: False
+target: 'DD359M'
+
+features:
+        - 48DGFE # ing bank
+        - 05ABBF # BNP Paribas
+        - 8B69AP # Société Générale
+        - 06DABK # Barclays
+        - EFAGG9 # Banco Santander
+        - 2H6677 # Deutsche Bank
+        - FH49GG # Crédit Agricole
+        - 8D8575 # Standard Chartered
+        - GG6EBT # Aviva
+        #- DD359M # Allianz
+        - FF667M # AXA
+        - 0H99B7 # BMW
+        - 2H66B7 # Lufthansa
+        - 8A87AG # Siemens
+        - NN2A8G # airbus
+        - 6A516F # nestle
