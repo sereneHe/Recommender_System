@@ -27,7 +27,7 @@ def load_data(variant, normalize, data_path):
     else:
         assert False
 
-    df = pd.read_csv("your_file.csv", header=0)
+    df = pd.read_csv(join(data_path, f"{filename}.csv"), header=0)
     if normalize:
 
         df = df - np.mean(df, axis=0, keepdims=True)

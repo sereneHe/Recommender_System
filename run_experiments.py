@@ -40,6 +40,7 @@ def start_experiment(cfg: DictConfig) -> None:
         log_params_from_omegaconf_dict(cfg)
         log_system_info(HydraConfig.get())
 
+        prep_data = None
         if cfg.problem.name == "codiet":
             food_feats, non_food_feats, prep_data = load_all_data()
             with zipfile.ZipFile("./data/W_est.csv.zip") as z:
@@ -53,10 +54,11 @@ def start_experiment(cfg: DictConfig) -> None:
 
         if cfg.problem.name == "cds":
             from cds_utils import load_data
+            prep_data = load_data(cfg.problem.n, cfg.problem.granularity, cfg.problem.p, cfg.problem.data_path)
         if cfg.problem.name == 'Sachs':
             from sachs_utils import load_data
         if cfg.problem.name in ["cds", "Sachs"]:
-            prep_data = load_data(cfg.problem.n, cfg.problem.granularity, cfg.problem.p, cfg.problem.data_path)
+            prep_data = load_data(cfg.problem.variant, cfg.problem.normalize, cfg.problem.data_path)
             with zipfile.ZipFile(join(cfg.problem.data_path, "W_est.csv.zip")) as z:
                 with z.open(f"W_est_{cfg.problem.name}.csv") as f:
                     w_est = np.loadtxt(f, delimiter=",")
