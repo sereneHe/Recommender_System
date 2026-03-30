@@ -23,7 +23,7 @@ import mlflow
 from mlflow import log_metric, log_metrics, log_param, log_artifact, log_text, log_table, log_dict
 
 
-@hydra.main(version_base=None,  config_path="./src/industry/experiments_conf", config_name="config")
+@hydra.main(version_base=None,  config_path="./experiments_conf", config_name="config")
 @log_exceptions
 def start_experiment(cfg: DictConfig) -> None:
     output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
@@ -54,44 +54,16 @@ def start_experiment(cfg: DictConfig) -> None:
 
         if cfg.problem.name == "cds":
             from cds_utils import load_data
-
-            prep_data = load_data(
-                cfg.problem.n,
-                cfg.problem.granularity,
-                cfg.problem.p,
-                cfg.problem.data_path,
-            )
-        if cfg.problem.name == "industry_eu":
-            from src.industry.data_industry import load_data
-
-            prep_data = load_data(
-                cfg.problem.data_path,
-                frequency=cfg.problem.get("frequency"),
-                target=cfg.problem.get("target"),
-                features=cfg.problem.get("features"),
-                start_date=cfg.problem.get("start_date"),
-                end_date=cfg.problem.get("end_date"),
-                impute=cfg.problem.get("impute", "none"),
-                dropna_selected=cfg.problem.get("dropna_selected", True),
-            )
+            prep_data = load_data(cfg.problem.n, cfg.problem.granularity, cfg.problem.p, cfg.problem.data_path)
         if cfg.problem.name == 'Sachs':
             from sachs_utils import load_data
-
+        if cfg.problem.name in ["cds", "Sachs"]:
             prep_data = load_data(cfg.problem.variant, cfg.problem.normalize, cfg.problem.data_path)
             with zipfile.ZipFile(join(cfg.problem.data_path, "W_est.csv.zip")) as z:
                 with z.open(f"W_est_{cfg.problem.name}.csv") as f:
                     w_est = np.loadtxt(f, delimiter=",")
             mlflow.log_artifact(join(cfg.problem.data_path, "W_est.csv.zip"))
             row_and_col_names = prep_data.columns
-        if cfg.problem.name == "cds":
-            with zipfile.ZipFile(join(cfg.problem.data_path, "W_est.csv.zip")) as z:
-                with z.open("W_est_cds.csv") as f:
-                    w_est = np.loadtxt(f, delimiter=",")
-            mlflow.log_artifact(join(cfg.problem.data_path, "W_est.csv.zip"))
-            row_and_col_names = prep_data.columns
-        if cfg.problem.name == "industry_eu":
-            row_and_col_names = prep_data.columns
-            w_est = np.zeros((len(row_and_col_names), len(row_and_col_names)))
 
         print(row_and_col_names)
         start_time = time.time()
