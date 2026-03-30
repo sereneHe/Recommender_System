@@ -1,0 +1,23 @@
+name: industry_eu
+data_path: 'data/industry_eu/processed/industry_eu_16country_quarterly_265x16.csv'
+frequency: 'Q'
+impute: 'none'
+dropna_selected: true
+target: 'SVK'
+
+features:
+  - DEU
+  - BEL
+  - ITA
+  - LUX
+  - PRT
+  - AUT
+  - FRA
+  - NLD
+  - FIN
+  - GRC
+  - ESP
+  - IRL
+  - SVN
+  - EST
+  - LTU

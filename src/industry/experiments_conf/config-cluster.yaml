@@ -1,0 +1,11 @@
+hydra:
+  sweeper:
+    max_batch_size: 500 # There is a quota on RCI cluster that limits number of scheduled jobs to 500.
+    params:
+
+experiment: recommender_industry
+defaults:
+  - solver: mark
+  - problem: 9countries/industry_eu_deu
+  - override hydra/launcher: configured_submitit_slurm
+  - _self_

@@ -1,0 +1,11 @@
+hydra:
+  sweeper:
+    params:
+
+experiment: recommender_industry
+defaults:
+  - solver: mark
+  - problem: 9countries/industry_eu_deu
+  - override hydra/launcher: configured_joblib
+  - _self_
+

@@ -1,0 +1,14 @@
+hydra-core
+hydra-submitit-launcher
+omegaconf
+mlflow
+networkx
+numpy
+pandas
+matplotlib
+scipy
+scikit-learn
+xgboost
+torch
+gurobipy
+humancompatible
