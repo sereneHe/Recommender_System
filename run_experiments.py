@@ -53,8 +53,8 @@ def start_experiment(cfg: DictConfig) -> None:
             row_and_col_names = ast.literal_eval(s) #[x.strip() for x in s.strip("[]").split(",")]
 
         if cfg.problem.name == "cds":
-            from cds_utils import load_data
-            prep_data = load_data(cfg.problem.n, cfg.problem.granularity, cfg.problem.p, cfg.problem.data_path)
+            import sachs_utils
+            prep_data = cds_utils.load_data(cfg.problem.n, cfg.problem.granularity, cfg.problem.p, cfg.problem.data_path)
         if cfg.problem.name == "industry_eu":
             from data_industry import load_data
 
@@ -69,9 +69,10 @@ def start_experiment(cfg: DictConfig) -> None:
                 dropna_selected=cfg.problem.get("dropna_selected", True),
             )
         if cfg.problem.name == 'Sachs':
-            from sachs_utils import load_data
+            import sachs_utils
+            #from sachs_utils import load_data
+            prep_data = sachs_utils.load_data(cfg.problem.variant, cfg.problem.normalize, cfg.problem.data_path)
         if cfg.problem.name in ["cds", "Sachs"]:
-            prep_data = load_data(cfg.problem.variant, cfg.problem.normalize, cfg.problem.data_path)
             with zipfile.ZipFile(join(cfg.problem.data_path, "W_est.csv.zip")) as z:
                 with z.open(f"W_est_{cfg.problem.name}.csv") as f:
                     w_est = np.loadtxt(f, delimiter=",")
