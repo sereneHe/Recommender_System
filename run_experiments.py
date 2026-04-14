@@ -53,7 +53,7 @@ def start_experiment(cfg: DictConfig) -> None:
             row_and_col_names = ast.literal_eval(s) #[x.strip() for x in s.strip("[]").split(",")]
 
         if cfg.problem.name == "cds":
-            import sachs_utils
+            import cds_utils
             prep_data = cds_utils.load_data(cfg.problem.n, cfg.problem.granularity, cfg.problem.p, cfg.problem.data_path)
         if cfg.problem.name == "industry_eu":
             from data_industry import load_data
