@@ -2,21 +2,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-# from alm import ALM
-# from moreau import MoreauEnvelope
-
 from humancompatible.train.dual_optim import ALM, MoreauEnvelope
 from torch.nn import MSELoss
+import logging
 
-
-# ------------------------------------------------------------
-# Utility (same as your scikit baseline)
-# ------------------------------------------------------------
-
-def compute_predictor_errors(preds, y, y_train_mean):
-    mse = np.mean((preds - y) ** 2)
-    bench = np.mean((y - y_train_mean) ** 2)
-    return mse / bench
+# def compute_predictor_errors(preds, y, y_train_mean):
+#     mse = np.mean((preds - y) ** 2)
+#     bench = np.mean((y - y_train_mean) ** 2)
+#     return mse / bench
 
 
 # ------------------------------------------------------------
@@ -83,10 +76,12 @@ def fit_aug_lagrangian_nn_constraint(
     # Precompute constraint components
     M = W - torch.eye(d + 1, device=device)
     muX = X.mean(dim=0)
+    g0 = M[:, :-1] @ muX
     v = M[:, -1]
 
     if torch.allclose(v, torch.zeros_like(v)):
         raise ValueError("Constraint does not depend on predictions.")
+    logging.info(f"Sanity check: GT constraint = {W_constraint(v, g0, y)}")
 
     loss = MSELoss()
 
@@ -97,7 +92,7 @@ def fit_aug_lagrangian_nn_constraint(
             mse = loss(yhat, y)
 
             if cfg.constrained:
-                g = W_constraint(M, muX, yhat)
+                g = W_constraint(v, g0, yhat)
                 aug_loss = dual_opt.forward(loss=mse, constraints=g)
                 aug_loss.backward()
             else:
@@ -106,21 +101,17 @@ def fit_aug_lagrangian_nn_constraint(
 
         if cfg.constrained:
             with torch.no_grad():
-                muY = model(X).mean()
-                xy_bar = torch.cat([muX, muY.unsqueeze(0)])
-                g = torch.abs(xy_bar - M @ xy_bar)
                 dual_opt.update(g)
             lam = dual_opt.duals.detach().numpy()
 
         for param_group in optimizer.param_groups:
-            param_group['lr'] *= 0.95
+            param_group['lr'] *= cfg.lr_decay
 
         lam = dual_opt.duals.detach().numpy()
-
         if verbose:
             print(
                 f"outer={outer:02d}  "
-                f"mean(yhat)={muY.item():+.6e}  "
+                f"mean(yhat)={yhat.mean().item():+.6e}  "
                 f"MSE={mse.item():+.6e}  "
                 f"||g||={np.linalg.norm(g).item():.6e}  "
                 f"lambda_norm={np.linalg.norm(lam).item():.6e}"
@@ -128,8 +119,8 @@ def fit_aug_lagrangian_nn_constraint(
 
     return model, lam
 
-def W_constraint(M, muX, yhat):
-    muY = yhat.mean()
-    xy_bar = torch.cat([muX, muY.unsqueeze(0)])
-    g = torch.abs(xy_bar - M @ xy_bar)
+def W_constraint(v, g0, y):
+    if y.ndim < 2:
+        y = y.unsqueeze(1)
+    g = g0 + y.mean(axis=0) * v 
     return g

@@ -92,7 +92,7 @@ def start_experiment(cfg: DictConfig) -> None:
             n_select_features = len(full_feats)
         current_column_names = list(prep_data.columns)  # food_feats + non_food_feats
         mlflow.log_text('[' + ", ".join(current_column_names) + "]", "data_feats_list.txt")
-        curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_test_errs, w_est = run_feature_selection_scikit(
+        curr_feats, curr_train_errs, curr_test_errs, all_train_errs, all_train_cs, all_test_errs, all_test_cs, w_est = run_feature_selection_scikit(
             prep_data,
             cfg.solver.model_name,
             cfg.solver.custom_objective,
@@ -122,7 +122,12 @@ def start_experiment(cfg: DictConfig) -> None:
 
         #curr_feats, curr_train_err, curr_test_err, all_train_errs, all_test_errs = run_recommender(food_feats, non_food_feats, prep_data, target_feat, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
 
-        log_dict({'train_errs': all_train_errs.tolist(), 'test_errs': all_test_errs.tolist()}, 'cv_errors.yaml')
+        log_dict({
+            'train_errs': all_train_errs.tolist(),
+            'train_constr': all_train_cs.tolist(),
+            'test_errs': all_test_errs.tolist(),
+            'test_cs': all_test_cs.tolist()},
+            'cv_errors.yaml')
         # print(result)
         #
         # assert len(result) == 1

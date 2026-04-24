@@ -8,7 +8,7 @@ import torch
 
 
 from compute_tools import compute_predictor_errors
-from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, HCRecommenderPredictor, compute_predictor_errors_scikit
+from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, HCRecommenderPredictor, compute_predictor_errors_and_cs_scikit, compute_predictor_errors_scikit
 
 
 def get_mean_average_errors(prep_data, run_feats, target_col, w_est, row_and_col_names,
@@ -161,8 +161,6 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         )
 
         sfs.fit(X, y)
-
-
         # here are the selected features
         best_features = X.columns[sfs.get_support()]
         mlflow.log_metric("number_of_best_features", len(best_features))
@@ -183,7 +181,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
     results = cross_validate(model, X_selected, y,
         cv=n_runs,
-        scoring=compute_predictor_errors_scikit,
+        scoring=(lambda estimator, X, y: compute_predictor_errors_and_cs_scikit(estimator, X, y, estimator._w_est)) if isinstance(model,HCRecommenderPredictor) else compute_predictor_errors_scikit,
         return_train_score=True
     )
 
@@ -192,7 +190,13 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         model.fit(X_selected, y)
         w_est = model._w_est
         torch.save(model._rf_model_.state_dict(), "model.pt")
-    test_mse = results["test_score"].mean() / score_normalizer
-    train_mse = results["train_score"].mean() / score_normalizer
+    test_mse_fold = results["test_score"]
+    test_mse = test_mse_fold.mean() / score_normalizer
+    train_mse_fold = results["train_score"]
+    train_mse = train_mse_fold.mean() / score_normalizer
 
-    return best_features, train_mse, test_mse, results["train_score"] / score_normalizer, results["test_score"] / score_normalizer, w_est
+    if 'train_c' not in results:
+        results['train_c'] = np.zeros_like(test_mse_fold)
+        results['test_c'] = np.zeros_like(test_mse_fold)
+
+    return best_features, train_mse, test_mse, train_mse_fold / score_normalizer, results['train_c'], test_mse_fold / score_normalizer, results["test_c"], w_est

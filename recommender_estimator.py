@@ -23,10 +23,22 @@ import torch
 @torch.no_grad
 def compute_predictor_errors_scikit(estimator, X, y):
     test_mse = mean_squared_error(y, estimator.predict(X))
-    #test_bench = mean_squared_error(y, np.ones_like(y) * estimator._y_train_mean_)
+    return test_mse
 
-    return test_mse # / test_bench
-
+@torch.no_grad
+def compute_predictor_errors_and_cs_scikit(estimator, X, y, W):
+    y_pred = np.array(estimator.predict(X))
+    test_mse = mean_squared_error(y, y_pred)
+    if estimator._y_normalized:
+        y_pred_norm = (y_pred - estimator._y_mean)/ estimator._y_std
+    X = estimator.scaler_.transform(X) 
+    M = W - np.eye(X.shape[1] + 1)
+    muX = X.mean(axis=0)
+    g0 = M[:, :-1] @ muX
+    v = M[:, -1]
+    test_c = np.linalg.norm(g0 + y_pred_norm.mean(axis=0) * v)
+    
+    return {'score': test_mse, 'c': test_c}
 
 class RecommenderBaseEstimator(BaseEstimator):
     def __init__(self, w_est, target_col, row_and_col_names, custom_objective, prep_data, cfg):
@@ -110,14 +122,7 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                                                                         Y=[],
                                                                         B_ref=np.zeros((d,d)),
                                                                         tabu_edges=tabu_edges )
-                self._w_est = w_est # dont read this property if feature selector is used.
-                #print(w_est)
-
-                # row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-                # idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
-                # predict_idx = row_and_col_names_indices[self.target_col]
-                # w_est2 = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
-                #print(w_est2)
+                self._w_est = w_est
 
             else:
                 row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
@@ -185,9 +190,12 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
 
     def fit(self, X, y=None):
         _, X, y = self.preprocess_data(X, y)
-    # self._y_train_mean_ = y.mean()
         self.scaler_ = StandardScaler()
         X = self.scaler_.fit_transform(X)
+        self._y_mean = y.mean()
+        self._y_std = y.std()
+        y = (y - self._y_mean) / self._y_std
+        self._y_normalized = True
 
         if self.cfg.recalculate_dag:
             d = X.shape[1] + 1 # adding one for y
@@ -221,12 +229,17 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
                 
         self._rf_model_, lam = fit_aug_lagrangian_nn_constraint(X, y, w_est, self.cfg)
+
+        return self
         
 
     def predict(self, X):
         if self.custom_objective == 'lagrange':
             X = self.scaler_.transform(X)
-            return self._rf_model_.predict(X)
+            prediction = self._rf_model_.predict(X)
+            if self._y_normalized:
+                prediction = prediction * self._y_std + self._y_mean
+            return prediction 
         else:
             return super().predict(X)
 
