@@ -129,6 +129,7 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
                 idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
                 predict_idx = row_and_col_names_indices[self.target_col]
                 w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+                self._w_est = w_est
 
             # call exdbn
 
@@ -178,6 +179,7 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
 
         for i in range(X.shape[1]):
             col_data = X[:, i]
+            breakpoint()
             for col_name in self.prep_data.columns:
                 if col_name in current_feature_names:
                     continue
@@ -223,10 +225,15 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             self._w_est = w_est
 
         else:
+            # breakpoint()
             row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-            idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+            # temp fix cause the line below doesn't work
+            # idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+            idx_list = list(row_and_col_names_indices.values())
             predict_idx = row_and_col_names_indices[self.target_col]
+            idx_list.pop(predict_idx)
             w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
+            self._w_est = w_est
                 
         self._rf_model_, lam = fit_aug_lagrangian_nn_constraint(X, y, w_est, self.cfg)
 
