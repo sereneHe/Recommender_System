@@ -1,5 +1,90 @@
 # codiet_recommender
 
+## Industry Workflow
+
+Generate OECD raw data and processed industry datasets:
+
+```bash
+.venv/bin/python data_industry.py --retries 8 --sleep 1.5
+```
+
+This writes:
+
+- `data/industry_eu/raw/summary.csv`
+- `data/industry_eu/raw/all_countries_long.csv`
+- `data/industry_eu/processed/industry_eu_16country_monthly_1998_2023.csv`
+- `data/industry_eu/processed/industry_eu_9country_monthly_790x9.csv`
+- `data/industry_eu/processed/industry_eu_16country_quarterly_265x16.csv`
+
+Run a minimal single-target smoke test with `mark`:
+
+```bash
+.venv/bin/python run_experiments.py \
+  experiment="industry_mark_test" \
+  solver=mark \
+  problem=industry_eu_deu \
+  solver.n_runs=1 \
+  solver.N_SELECT_FEATURES=2
+```
+
+Run a minimal single-target smoke test with `mark_with_cc`:
+
+```bash
+.venv/bin/python run_experiments.py \
+  experiment="industry_markcc_test" \
+  solver=mark_with_cc \
+  problem=industry_eu_deu \
+  solver.n_runs=1 \
+  solver.N_SELECT_FEATURES=2 \
+  solver.n_outer=2 \
+  solver.time_limit=60
+```
+
+Run a minimal single-target smoke test with `hc_predictor`:
+
+```bash
+.venv/bin/python run_experiments.py \
+  experiment="industry_hc_test" \
+  solver=hc_predictor \
+  problem=industry_eu_deu \
+  solver.n_runs=1 \
+  solver.N_SELECT_FEATURES=2 \
+  solver.n_outer=2 \
+  solver.n_inner=10 \
+  solver.time_limit=60
+```
+
+Run all 9 flat industry problems in batch with `mark`:
+
+```bash
+PROBLEMS=$(python3 - <<'PY'
+from pathlib import Path
+base = Path("experiments_conf/problem")
+paths = sorted(base.glob("industry_eu_*.yaml"))
+print(",".join(p.stem for p in paths))
+PY
+)
+
+.venv/bin/python run_experiments.py \
+  --multirun \
+  --config-name=config \
+  experiment="industry_9_mark_batch" \
+  solver=mark \
+  problem="${PROBLEMS}" \
+  solver.n_runs=1 \
+  solver.N_SELECT_FEATURES=2
+```
+
+Draw final report figures into `reports/`:
+
+```bash
+.venv/bin/python plot.py --grid-industry-targets
+```
+
+Default outputs:
+
+- `reports/europe_industry_network_9countries_3x3.png`
+- `reports/europe_industry_network_16countries_4x4.png`
 
 
 ## Getting started

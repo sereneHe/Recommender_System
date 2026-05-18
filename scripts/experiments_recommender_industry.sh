@@ -1,20 +1,40 @@
 #!/bin/sh
 
+set -e
+
 export PYTHONPATH=$PYTHONPATH:../
-export DYLD_LIBRARY_PATH=/opt/homebrew/opt/libomp/lib:${DYLD_LIBRARY_PATH}
+export DYLD_LIBRARY_PATH="/opt/homebrew/opt/libomp/lib:${DYLD_LIBRARY_PATH}"
 
-CMD="python3 run_experiments.py --multirun --config-name=config"
-BASE="/Users/xiaoyuhe/Recommender_Pavel/src/industry/experiments_conf/problem"
+PROBLEM_GROUP="${PROBLEM_GROUP:-FRED_16country_quarterly}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-recommender_industry}"
+SOLVER_NAME="${SOLVER_NAME:-hc_predictor}"
+SOLVER_DATA_PATH="${SOLVER_DATA_PATH:-}"
+SOLVER_KNOWLEDGE_GRAPH_FILENAME="${SOLVER_KNOWLEDGE_GRAPH_FILENAME:-}"
+PYTHON_EXEC="${PYTHON_EXEC:-./.venv/bin/python3}"
+if [ ! -x "${PYTHON_EXEC}" ]; then
+  PYTHON_EXEC="python3"
+fi
 
-PROBLEMS=$(python3 - <<'PY'
+PROBLEM_LIST=$(
+${PYTHON_EXEC} - <<PY
 from pathlib import Path
 
-base = Path("/Users/xiaoyuhe/Recommender_Pavel/src/industry/experiments_conf/problem")
-paths = sorted(base.glob("9countries/*.yaml")) + sorted(base.glob("16countries/*.yaml"))
-problem_names = [str(path.relative_to(base).with_suffix("")).replace("\\", "/") for path in paths]
-print(",".join(problem_names))
+group = "${PROBLEM_GROUP}"
+root = Path("experiments_conf/problem") / group
+files = sorted(root.glob("industry_eu_*.yaml"))
+if not files:
+    raise SystemExit(f"No industry problem YAML files found in {root}")
+print(",".join(f"{group}/{path.stem}" for path in files))
 PY
 )
 
-echo "Running industry problems: ${PROBLEMS}"
-${CMD} experiment="recommender_industry" solver="hc_predictor" problem="${PROBLEMS}"
+CMD="${PYTHON_EXEC} run_experiments.py --multirun --config-name=config_industry"
+SOLVER_OVERRIDES=""
+if [ -n "${SOLVER_DATA_PATH}" ]; then
+SOLVER_OVERRIDES="${SOLVER_OVERRIDES} solver.data_path='${SOLVER_DATA_PATH}'"
+fi
+if [ -n "${SOLVER_KNOWLEDGE_GRAPH_FILENAME}" ]; then
+SOLVER_OVERRIDES="${SOLVER_OVERRIDES} solver.knowledge_graph_filename='${SOLVER_KNOWLEDGE_GRAPH_FILENAME}'"
+fi
+
+${CMD} experiment="${EXPERIMENT_NAME}" solver="${SOLVER_NAME}"${SOLVER_OVERRIDES} problem="${PROBLEM_LIST}"

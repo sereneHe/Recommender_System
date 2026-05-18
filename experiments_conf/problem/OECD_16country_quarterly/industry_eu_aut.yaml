@@ -1,0 +1,22 @@
+name: industry_eu
+data_path: data/industry_eu/processed/industry_eu_oecd_ExcludingConstruction_16country_quarterly_113x16.csv
+frequency: Q
+impute: none
+dropna_selected: true
+target: AUT
+features:
+- DEU
+- BEL
+- ITA
+- LUX
+- PRT
+- FRA
+- NLD
+- FIN
+- GRC
+- ESP
+- IRL
+- SVK
+- SVN
+- EST
+- LTU

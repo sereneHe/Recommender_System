@@ -1,0 +1,22 @@
+name: industry_eu
+data_path: data/industry_eu/processed/industry_eu_fred_ExcludingConstruction_16country_monthly_300x16.csv
+frequency: M
+impute: none
+dropna_selected: true
+target: ITA
+features:
+- DEU
+- BEL
+- LUX
+- PRT
+- AUT
+- FRA
+- NLD
+- FIN
+- GRC
+- ESP
+- IRL
+- SVK
+- SVN
+- EST
+- LTU

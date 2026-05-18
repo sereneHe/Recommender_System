@@ -1,0 +1,5 @@
+- experiment=recommender_industry
+- solver=hc_predictor
+- solver.data_path='./data/'
+- solver.knowledge_graph_filename='knowledge_graph_intersection.graphml'
+- problem=OECD_16country_quarterly/industry_eu_est

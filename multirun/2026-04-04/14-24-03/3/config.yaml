@@ -1,0 +1,30 @@
+solver:
+  name: mark
+  model_name: XGB
+  custom_objective: reg:squarederror
+  N_SELECT_FEATURES: 5
+  n_runs: 5
+  recalculate_dag: true
+  n_estimators: 10
+  max_depth: 3
+  learning_rate: 0.1
+  random_state: 42
+  feature_selector: SequentialFeatureSelector
+  debug: false
+problem:
+  name: industry_eu
+  data_path: data/industry_eu/processed/industry_eu_fred_ExcludingConstruction_9country_quarterly_260x9.csv
+  frequency: Q
+  impute: none
+  dropna_selected: true
+  target: FIN
+  features:
+  - DEU
+  - AUT
+  - BEL
+  - PRT
+  - ITA
+  - LUX
+  - FRA
+  - NLD
+experiment: recommender_industry_smoketest

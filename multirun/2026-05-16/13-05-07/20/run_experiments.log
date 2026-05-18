@@ -1,0 +1,15 @@
+[2026-05-16 14:04:26,581][__main__][INFO] - Starting experiment in /Users/xiaoyuhe/Recommender_Pavel/multirun/2026-05-16/13-05-07/20
+[2026-05-16 14:04:26,720][root][INFO] - w_est shape (25, 25)
+[2026-05-16 14:04:26,720][root][INFO] - target_col POL
+[2026-05-16 14:04:26,720][root][INFO] - row_and_col_names 25
+[2026-05-16 14:04:26,720][root][INFO] - prep_data.shape (89, 25)
+[2026-05-16 14:04:26,720][root][INFO] - row_and_col_names Index(['POL', 'AUT', 'BEL', 'CHE', 'CZE', 'DEU', 'DNK', 'ESP', 'EST', 'FIN',
+       'FRA', 'GRC', 'HUN', 'IRL', 'ISL', 'ITA', 'LTU', 'LUX', 'LVA', 'NLD',
+       'NOR', 'PRT', 'SVK', 'SVN', 'SWE'],
+      dtype='object')
+[2026-05-16 14:04:26,722][root][INFO] - Testing on columns 24: Index(['AUT', 'BEL', 'CHE', 'CZE', 'DEU', 'DNK', 'ESP', 'EST', 'FIN', 'FRA',
+       'GRC', 'HUN', 'IRL', 'ISL', 'ITA', 'LTU', 'LUX', 'LVA', 'NLD', 'NOR',
+       'PRT', 'SVK', 'SVN', 'SWE'],
+      dtype='object')
+[2026-05-16 14:07:23,971][root][INFO] - Best features Index(['BEL', 'CHE', 'EST', 'PRT', 'SVN'], dtype='object'), [ 1  2  7 20 22]
+[2026-05-16 14:07:26,168][__main__][INFO] - Experiment Finished

@@ -1,0 +1,13 @@
+[2026-04-03 18:16:39,956][__main__][INFO] - Starting experiment in /Users/xiaoyuhe/Recommender_Pavel/multirun/2026-04-03/18-10-23/11
+[2026-04-03 18:16:40,887][root][INFO] - w_est shape (16, 16)
+[2026-04-03 18:16:40,887][root][INFO] - target_col LUX
+[2026-04-03 18:16:40,887][root][INFO] - row_and_col_names 16
+[2026-04-03 18:16:40,887][root][INFO] - prep_data.shape (100, 16)
+[2026-04-03 18:16:40,887][root][INFO] - row_and_col_names Index(['LUX', 'DEU', 'BEL', 'ITA', 'PRT', 'AUT', 'FRA', 'NLD', 'FIN', 'GRC',
+       'ESP', 'IRL', 'SVK', 'SVN', 'EST', 'LTU'],
+      dtype='object')
+[2026-04-03 18:16:40,889][root][INFO] - Testing on columns 15: Index(['DEU', 'BEL', 'ITA', 'PRT', 'AUT', 'FRA', 'NLD', 'FIN', 'GRC', 'ESP',
+       'IRL', 'SVK', 'SVN', 'EST', 'LTU'],
+      dtype='object')
+[2026-04-03 18:17:14,044][root][INFO] - Best features Index(['PRT', 'NLD', 'GRC', 'IRL', 'LTU'], dtype='object'), [ 3  6  8 10 14]
+[2026-04-03 18:17:14,663][__main__][INFO] - Experiment Finished

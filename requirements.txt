@@ -11,4 +11,4 @@ scikit-learn
 xgboost
 torch
 gurobipy
-humancompatible
+humancompatible-train

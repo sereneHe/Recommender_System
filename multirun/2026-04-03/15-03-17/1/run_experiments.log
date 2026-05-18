@@ -1,0 +1,9 @@
+[2026-04-03 15:08:43,684][__main__][INFO] - Starting experiment in /Users/xiaoyuhe/Recommender_Pavel/multirun/2026-04-03/15-03-17/1
+[2026-04-03 15:08:43,810][root][INFO] - w_est shape (9, 9)
+[2026-04-03 15:08:43,810][root][INFO] - target_col BEL
+[2026-04-03 15:08:43,810][root][INFO] - row_and_col_names 9
+[2026-04-03 15:08:43,810][root][INFO] - prep_data.shape (780, 9)
+[2026-04-03 15:08:43,810][root][INFO] - row_and_col_names Index(['BEL', 'DEU', 'AUT', 'PRT', 'ITA', 'LUX', 'FRA', 'NLD', 'FIN'], dtype='object')
+[2026-04-03 15:08:43,819][root][INFO] - Testing on columns 8: Index(['DEU', 'AUT', 'PRT', 'ITA', 'LUX', 'FRA', 'NLD', 'FIN'], dtype='object')
+[2026-04-03 15:10:28,404][root][INFO] - Best features Index(['AUT', 'PRT', 'FRA', 'NLD', 'FIN'], dtype='object'), [1 2 5 6 7]
+[2026-04-03 15:10:36,278][__main__][INFO] - Experiment Finished

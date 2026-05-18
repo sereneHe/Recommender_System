@@ -1,0 +1,15 @@
+name: industry_eu
+data_path: data/industry_eu/processed/industry_eu_fred_ExcludingConstruction_9country_quarterly_260x9.csv
+frequency: Q
+impute: none
+dropna_selected: true
+target: ITA
+features:
+- DEU
+- AUT
+- BEL
+- PRT
+- LUX
+- FRA
+- NLD
+- FIN

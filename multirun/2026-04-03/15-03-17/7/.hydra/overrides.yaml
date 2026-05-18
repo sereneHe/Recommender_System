@@ -1,0 +1,3 @@
+- experiment=recommender_industry
+- solver=hc_predictor
+- problem=FRED_9country_monthly/industry_eu_nld

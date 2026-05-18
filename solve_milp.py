@@ -285,6 +285,7 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
 
     m.Params.lazyConstraints = 1
     m.Params.MIPGap = target_mip_gap
+    m.Params.NonConvex = 2
     m.params.TimeLimit = time_limit
     m._edges_vars = W_edges_vars
     m._edges_weights = W_edges_weights
@@ -375,7 +376,4 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
 #     acc = utils.count_accuracy(B_true, W_est != 0)
 #     print(stats)
 #     print(acc)
-
-
-
 

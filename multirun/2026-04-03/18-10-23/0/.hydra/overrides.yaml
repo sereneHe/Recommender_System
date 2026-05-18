@@ -1,0 +1,3 @@
+- experiment=recommender_industry_mark
+- solver=mark
+- problem=FRED_16country_quarterly/industry_eu_aut
