@@ -9,6 +9,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import pandas as pd
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -82,16 +83,102 @@ ACTIVITY_LABELS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Fetch and build OECD industry tables.')
+    subparsers = parser.add_subparsers(dest='command')
+
     parser.add_argument('--source', choices=['oecd', 'fred'], default='oecd')
     parser.add_argument('--retries', type=int, default=10)
     parser.add_argument('--timeout', type=int, default=300)
     parser.add_argument('--sleep', type=float, default=0.4)
     parser.add_argument('--activity', choices=sorted(ACTIVITY_LABELS), default='BTE')
+
+    problem_parser = subparsers.add_parser(
+        'generate-problems',
+        help='Generate Hydra problem YAML files from a processed industry table.',
+    )
+    problem_parser.add_argument(
+        '--csv',
+        required=True,
+        help='Processed CSV path relative to repo root or absolute path.',
+    )
+    problem_parser.add_argument(
+        '--output-dir',
+        required=True,
+        help='Directory where problem YAML files will be written.',
+    )
+    problem_parser.add_argument(
+        '--name',
+        default='industry_eu',
+        help='Problem name stored in each YAML.',
+    )
+    problem_parser.add_argument(
+        '--frequency',
+        default='M',
+        help='Problem frequency stored in each YAML.',
+    )
+    problem_parser.add_argument(
+        '--impute',
+        default='none',
+        help='Problem imputation mode.',
+    )
+    problem_parser.add_argument(
+        '--dropna-selected',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Value for dropna_selected in generated YAML files.',
+    )
     return parser.parse_args()
 
 
 def _activity_slug(activity: str) -> str:
     return ACTIVITY_LABELS.get(activity, activity.strip('_').lower())
+
+
+def _resolve_repo_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return REPO_ROOT / path
+
+
+def _problem_yaml_path(output_dir: Path, name: str, target: str) -> Path:
+    return output_dir / f'{name}_{target.lower()}.yaml'
+
+
+def generate_problem_configs(
+    csv_path: str | Path,
+    output_dir: str | Path,
+    name: str = 'industry_eu',
+    frequency: str = 'M',
+    impute: str = 'none',
+    dropna_selected: bool = True,
+) -> list[Path]:
+    csv_path = _resolve_repo_path(str(csv_path))
+    output_dir = _resolve_repo_path(str(output_dir))
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    df = pd.read_csv(csv_path, nrows=1)
+    countries = [column for column in df.columns if column != 'date']
+    csv_ref = str(csv_path) if csv_path.is_absolute() else str(csv_path)
+
+    written = []
+    for target in countries:
+        features = [country for country in countries if country != target]
+        data = {
+            'name': name,
+            'data_path': str(csv_path.relative_to(REPO_ROOT)) if csv_path.is_relative_to(REPO_ROOT) else csv_ref,
+            'frequency': frequency,
+            'impute': impute,
+            'dropna_selected': dropna_selected,
+            'target': target,
+            'features': features,
+        }
+        yaml_path = _problem_yaml_path(output_dir, name, target)
+        yaml_path.write_text(
+            yaml.safe_dump(data, sort_keys=False, default_flow_style=False),
+            encoding='utf-8',
+        )
+        written.append(yaml_path)
+    return written
 
 
 def oecd_url(country_code: str, freq: str, activity: str = 'BTE') -> tuple[str, str]:
@@ -583,6 +670,19 @@ def load_data(
 
 def main() -> None:
     args = parse_args()
+    if args.command == 'generate-problems':
+        written = generate_problem_configs(
+            csv_path=args.csv,
+            output_dir=args.output_dir,
+            name=args.name,
+            frequency=args.frequency,
+            impute=args.impute,
+            dropna_selected=args.dropna_selected,
+        )
+        for path in written:
+            print(path)
+        return
+
     if args.source == 'oecd':
         write_quarterly_raw(activity=args.activity, retries=args.retries, timeout=args.timeout, sleep_s=args.sleep)
         monthly_summary_path = write_monthly_summary(activity=args.activity)
