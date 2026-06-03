@@ -2,7 +2,7 @@ name: hc_predictor
 model_name: HC
 custom_objective: lagrange #mse_builtin #mse_custom
 N_SELECT_FEATURES: 5
-n_runs: 5
+n_runs: 10
 recalculate_dag: true
 
 
@@ -14,10 +14,11 @@ hidden_dim: 32
 depth: 2
 
 constrained: true
-rho0: 0
+rho0: 1.0
 lambda0: 1.0
 rho_mult: 1.0
 learning_rate: 0.25
+lr_decay: 0.95
 lambda_update_rate: 1.0
 weight_decay: 0.25
 

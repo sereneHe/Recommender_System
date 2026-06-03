@@ -1,0 +1,87 @@
+name: hc_predictor_ce
+model_name: HC-CE
+custom_objective: lagrange
+N_SELECT_FEATURES: 5
+n_runs: 5
+recalculate_dag: true
+feature_selector: SequentialFeatureSelector
+
+n_outer: 10
+n_inner: 100
+hidden_dim: 32
+depth: 2
+
+# MILP parameters
+loss_type: l2
+reg_type: l2
+a_reg_type: l1
+lambda1: 0.01
+lambda2: 0.01
+lr_decay: 0.95
+nonzero_threshold: 0.05
+constraints_mode: weights
+callback_mode: all_cycles
+robust: false
+tabu_edges: false
+weights_bound: 1.0
+time_limit: 1800
+target_mip_gap: 0.0001
+
+# codiet parameters
+data_path: './data/'
+knowledge_graph_filename: 'knowledge_graph_intersection.graphml'
+debug: false
+
+# Conditional independence penalty parameters
+use_ci_penalty: true
+ci_penalty_kind: conditional_expectation
+# CE constraint backend:
+# - alm_pbm: independence uses ALM equality, dependence uses PBM inequality.
+# - alm_all: independence and dependence both use ALM equality-style constraints.
+# - pbm_all: independence and dependence both use PBM inequalities.
+ce_constraint_backend: alm_pbm
+ci_mode: manual
+ci_manual_from_training_dag: true
+ci_threshold: 0.05
+ci_skip_if_direct_edge: true
+ci_add_dsep_independence: true
+
+#shielded_collider
+ci_add_shielded_collider_dependence: true
+# Turn this on to use the shielded-collider anti-lock preset below.
+ci_use_shielded_collider_limits: false
+ci_shielded_dependent_margin: 0.01
+ci_max_shielded_constraints_per_collider: 2
+ci_max_shielded_constraints_per_target: 4
+ci_shielded_exclude_target_in_pair: true
+
+ci_max_dsep_separator_size: null
+ci_dependent_margin: 0.05
+ce_independence_tolerance: 0.0
+ce_use_balanced_batches: true
+ce_batch_size: 128
+# auto: discrete targets use target-value groups; continuous targets use target quantile pseudo groups.
+ce_sensitive_group_source: auto
+ce_sensitive_bins: 4
+ce_discrete_max_groups: 20
+ci_pbm_mu: 0.3
+ci_pbm_lr: 0.95
+ci_pbm_penalty_update: const
+ci_pbm_init_duals: 0.01
+ci_pbm_init_penalties: 1.0
+ci_pbm_penalty_range:
+  - 0.001
+  - 100.0
+ci_pbm_dual_range:
+  - 0.01
+  - 100.0
+# NN parameters
+constrained: true
+use_w_constraints: true
+rho0: 1.0
+lambda0: 1.0
+alm_momentum: 0.6
+rho_mult: 1.0
+learning_rate: 0.25
+lambda_update_rate: 1.0
+weight_decay: 0.25

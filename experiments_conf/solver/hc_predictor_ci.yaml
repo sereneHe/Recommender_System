@@ -1,0 +1,53 @@
+name: hc_predictor_ci
+model_name: HC-CI
+custom_objective: lagrange
+N_SELECT_FEATURES: 5
+n_runs: 5
+recalculate_dag: true
+
+feature_selector: SequentialFeatureSelector
+
+n_outer: 10
+n_inner: 100
+hidden_dim: 32
+depth: 2
+
+constrained: true
+use_w_constraints: true
+rho0: 0
+lambda0: 1.0
+rho_mult: 1.0
+learning_rate: 0.25
+lambda_update_rate: 1.0
+weight_decay: 0.25
+
+loss_type: l2
+reg_type: l2
+a_reg_type: l1
+lambda1: 000.1
+lambda2: 000.1
+lr_decay: 0.95
+nonzero_threshold: 0.001
+constraints_mode: weights
+callback_mode: all_cycles
+robust: false
+tabu_edges: false
+weights_bound: 1.0
+time_limit: 1800
+target_mip_gap: 0.0001
+
+data_path: './data/'
+knowledge_graph_filename: 'knowledge_graph_intersection.graphml'
+
+debug: false
+use_ci_penalty: true
+lambda_ci: 0.01
+ci_penalty_kind: conditional_correlation
+ci_mode: conservative
+ci_constraints: []
+ci_threshold: 1.0e-8
+ci_skip_if_direct_edge: true
+ci_add_dsep_independence: true
+ci_max_dsep_separator_size: null
+ci_dependent_margin: 0.05
+ci_eps: 1.0e-8

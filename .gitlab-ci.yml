@@ -1,0 +1,45 @@
+image: python:3.11
+
+stages:
+  - test
+  - run
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTHONPATH: "$CI_PROJECT_DIR"
+
+cache:
+  paths:
+    - .cache/pip
+    - .venv/
+
+before_script:
+  - python -m venv .venv
+  - source .venv/bin/activate
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
+  - |
+    if [ -n "$GUROBI_LICENSE" ]; then
+      mkdir -p "$CI_PROJECT_DIR/gurobi"
+      printf "%s" "$GUROBI_LICENSE" > "$CI_PROJECT_DIR/gurobi/gurobi.lic"
+      export GRB_LICENSE_FILE="$CI_PROJECT_DIR/gurobi/gurobi.lic"
+    fi
+
+test_imports:
+  stage: test
+  script:
+    - source .venv/bin/activate
+    - python -c "import gurobipy as gp; print('gurobi', gp.gurobi.version())"
+    - python -c "import hydra, mlflow, numpy, pandas, sklearn, torch, xgboost; print('imports ok')"
+
+run_hc_predictor_ci_smoke:
+  stage: run
+  script:
+    - source .venv/bin/activate
+    - python run_experiments.py --config-name=config experiment=INDUSTRY_RECOMMENDER solver=hc_predictor_ci problem=FRED_9country_monthly/industry_eu_aut
+  artifacts:
+    paths:
+      - multirun/
+      - mlruns/
+    when: always
+    expire_in: 1 week

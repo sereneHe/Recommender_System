@@ -1,4 +1,3 @@
-import mlflow
 import numpy as np
 import logging
 from sklearn.feature_selection import SequentialFeatureSelector
@@ -7,8 +6,17 @@ from sklearn.model_selection import cross_validate
 import torch
 
 
+from artifact_utils import write_text_artifact, write_yaml_artifact
 from compute_tools import compute_predictor_errors
-from recommender_estimator import XGBRecommenderPredictor, REGRecommenderPredictor, HCRecommenderPredictor, compute_predictor_errors_and_cs_scikit, compute_predictor_errors_scikit
+from recommender_estimator import (
+    XGBRecommenderPredictor,
+    REGRecommenderPredictor,
+    HCRecommenderPredictor,
+    HCCIRecommenderPredictor,
+    HCCERecommenderPredictor,
+    compute_predictor_errors_and_cs_scikit,
+    compute_predictor_errors_scikit,
+)
 
 
 def get_mean_average_errors(prep_data, run_feats, target_col, w_est, row_and_col_names,
@@ -109,12 +117,19 @@ def create_model(model_name, w_est, target_col, row_and_col_names, custom_object
                                         solver_cfg)  # prep_data[row_and_col_names]
     elif model_name == "REG":
         model = REGRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective, prep_data, solver_cfg)
-    elif model_name == "HC":
+    elif model_name in {"HC", "HC-CI", "HC-CE"}:
         torch.manual_seed(42)
-        model = HCRecommenderPredictor(w_est, target_col, row_and_col_names, custom_objective,
-                                       prep_data, solver_cfg)
+        solver_name = str(getattr(solver_cfg, "name", ""))
+        if model_name == "HC-CI" or solver_name == "hc_predictor_ci":
+            model_class = HCCIRecommenderPredictor
+        elif model_name == "HC-CE" or solver_name == "hc_predictor_ce":
+            model_class = HCCERecommenderPredictor
+        else:
+            model_class = HCRecommenderPredictor
+        model = model_class(w_est, target_col, row_and_col_names, custom_objective,
+                            prep_data, solver_cfg)
     if model is None:
-        raise ValueError("Model can be only XGB or REG.")
+        raise ValueError("Model can be only XGB, REG, HC, HC-CI, or HC-CE.")
     return model
 
 
@@ -134,9 +149,6 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
     model = create_model(model_name, w_est, target_col, row_and_col_names, custom_objective, prep_data,
                                         solver_cfg)
-    #mlflow.log_param("feature_selector", "SequentialFeatureSelector")
-
-
     assert all(isinstance(col, str) for col in prep_data.columns)
     prep_data = prep_data.dropna(subset=[target_col])
     y = prep_data[target_col]
@@ -163,8 +175,8 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         sfs.fit(X, y)
         # here are the selected features
         best_features = X.columns[sfs.get_support()]
-        mlflow.log_metric("number_of_best_features", len(best_features))
-        mlflow.log_dict({'selected_best_features': list(best_features)}, "selected_features.yaml")
+        write_text_artifact("selected_features_param.txt", ", ".join(str(feature) for feature in best_features))
+        write_yaml_artifact("selected_features.yaml", {'selected_best_features': list(best_features)})
         selected_indices = sfs.get_support(indices=True)
 
         logging.info(f"Best features {best_features}, {selected_indices}")
@@ -181,7 +193,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
 
     results = cross_validate(model, X_selected, y,
         cv=n_runs,
-        scoring=(lambda estimator, X, y: compute_predictor_errors_and_cs_scikit(estimator, X, y, estimator._w_est)) if isinstance(model,HCRecommenderPredictor) else compute_predictor_errors_scikit,
+        scoring=(lambda estimator, X, y: compute_predictor_errors_and_cs_scikit(estimator, X, y, estimator._w_est)) if isinstance(model, HCRecommenderPredictor) else compute_predictor_errors_scikit,
         return_train_score=True
     )
 
@@ -189,10 +201,16 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         # add fit call to get the graph for selected features
         model.fit(X_selected, y)
         w_est = model._w_est
-        torch.save(model._rf_model_.state_dict(), "model.pt")
     test_mse_fold = results["test_score"]
     test_mse = test_mse_fold.mean() / score_normalizer
     train_mse_fold = results["train_score"]
     train_mse = train_mse_fold.mean() / score_normalizer
 
-    return best_features, train_mse, test_mse, results["train_score"] / score_normalizer, results["test_score"] / score_normalizer, w_est
+    return (
+        best_features,
+        train_mse,
+        test_mse,
+        train_mse_fold / score_normalizer,
+        test_mse_fold / score_normalizer,
+        w_est,
+    )

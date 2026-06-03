@@ -1,7 +1,12 @@
-outputs
 .idea
 *.backup
 __pycache__
-mlruns
 mlflow.db
-data/energy_expenditure
+optuna_hc.py
+multirun/
+mlruns/
+.venv/
+PC/
+model.pt
+*.DS_Store
+*.log

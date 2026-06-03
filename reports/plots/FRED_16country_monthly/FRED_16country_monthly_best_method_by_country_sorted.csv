@@ -1,0 +1,17 @@
+rank,target,best_method,best_method_label,best_test_mean
+1,EST,hc_predictor_ce_shielded_collider_limit,HC-Predictor-CE (shielded collider limit),0.8620919913040107
+2,SVK,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),0.9553760372222548
+3,FRA,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),0.9708553558858628
+4,PRT,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.0018851067122745
+5,AUT,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.02254057605857
+6,LUX,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.059303152178099
+7,ESP,hc_predictor_ce_shielded_collider_limit,HC-Predictor-CE (shielded collider limit),1.0757362417924914
+8,FIN,hc_predictor_ce_ori,HC-Predictor-CE (dense DAG),1.0843353525630284
+9,BEL,hc_predictor_ce_shielded_collider_limit,HC-Predictor-CE (shielded collider limit),1.1052397519400108
+10,DEU,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.134610164819124
+11,LTU,hc_predictor_ce_shielded_collider_limit,HC-Predictor-CE (shielded collider limit),1.1381348858780451
+12,NLD,hc_predictor,HC-Predictor,1.1501082330011894
+13,ITA,hc_predictor_ce_ori,HC-Predictor-CE (dense DAG),1.1968401619133568
+14,SVN,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.2766725321807146
+15,IRL,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.2975597010246698
+16,GRC,hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.3796218648374967

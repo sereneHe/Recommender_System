@@ -1,8 +1,8 @@
 import os
 
-import mlflow
-from mlflow import log_param
 from omegaconf import DictConfig, ListConfig
+
+from artifact_utils import write_yaml_artifact
 
 
 def _create_recursive(parent_name, element):
@@ -31,32 +31,44 @@ def create_mlflow_query_string(params: DictConfig, finished=True):
 def log_system_info(hydra_config: DictConfig):
     mem_per_cpu = hydra_config.launcher.get("mem_per_cpu")
     if mem_per_cpu is not None:
-        log_param('slurm.mem_per_cpu', mem_per_cpu)
+        pass
 
     cpus_per_task = hydra_config.launcher.get("cpus_per_task")
     if cpus_per_task is not None:
-        log_param('slurm.cpus_per_task', cpus_per_task)
+        pass
 
     partition = hydra_config.launcher.get("partition")
     if partition is not None:
-        log_param('slurm.partition', partition)
-    log_param('system.hostname', os.uname()[1])
+        pass
+    write_yaml_artifact(
+        "system_info.yaml",
+        {
+            "hostname": os.uname()[1],
+            "mem_per_cpu": mem_per_cpu,
+            "cpus_per_task": cpus_per_task,
+            "partition": partition,
+        },
+    )
 
 
 def log_params_from_omegaconf_dict(params, only_keys=None):
+    data = {}
     for param_name, element in params.items():
         if only_keys is None or param_name in only_keys:
-            _explore_recursive(param_name, element)
+            data[param_name] = _collect_recursive(element)
+    write_yaml_artifact("params.yaml", data)
 
-def _explore_recursive(parent_name, element):
+
+def _collect_recursive(element):
     if isinstance(element, DictConfig):
+        result = {}
         for k, v in element.items():
             if isinstance(v, DictConfig) or isinstance(v, ListConfig):
-                _explore_recursive(f'{parent_name}.{k}', v)
+                result[k] = _collect_recursive(v)
             else:
-                mlflow.log_param(f'{parent_name}.{k}', v)
+                result[k] = v
+        return result
     elif isinstance(element, ListConfig):
-        for i, v in enumerate(element):
-            mlflow.log_param(f'{parent_name}.{i}', v)
+        return [_collect_recursive(v) if isinstance(v, (DictConfig, ListConfig)) else v for v in element]
     else:
-        mlflow.log_param(parent_name, element)
+        return element

@@ -1,0 +1,8 @@
+method,method_label,test_mean,train_mean,runtime,selected_features
+hc_predictor_ce_ori,HC-Predictor-CE (dense DAG),1.0843353525630284,0.9244933833027192,712.6133769999997,"DEU, ITA, PRT, FRA, SVK"
+hc_predictor_ce_ceThreshold_0.05,HC-Predictor-CE (ceThreshold=0.05),1.0843353525630284,0.9244933833027192,712.6133769999997,"DEU, ITA, PRT, FRA, SVK"
+hc_predictor_ce_milpLambda_0.05,HC-Predictor-CE (milpLambda=0.05),1.0843353525630284,0.9244933833027192,712.6133769999997,"DEU, ITA, PRT, FRA, SVK"
+mark_with_cc,MARK with CC,1.202037578319587,0.7019533332089564,518.3547929999986,"GRC, IRL, SVK, SVN, LTU"
+hc_predictor_ce_shielded_collider_limit,HC-Predictor-CE (shielded collider limit),1.2096677868108054,0.8935180959295032,1142.9458429999995,"DEU, GRC, ESP, SVK, EST"
+hc_predictor,HC-Predictor,1.2129387771115898,0.9179455204342816,332.3497259616852,"DEU, ESP, SVK, SVN, LTU"
+hc_predictor_ce_shielded_collider,HC-Predictor-CE (shielded collider),1.559078876851821,0.9562565897101258,1597.7895129999995,"ITA, FRA, ESP, IRL, SVK"

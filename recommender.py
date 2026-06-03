@@ -1,4 +1,3 @@
-import mlflow
 import networkx as nx
 import numpy as np
 import zipfile
@@ -13,6 +12,7 @@ import pickle as pkl
 
 from xgboost import XGBRegressor
 
+from artifact_utils import write_text_artifact
 from data_helper import load_all_data
 from recommender_utils import run_feature_selection, run_feature_selection_scikit
 
@@ -71,10 +71,8 @@ def run_recommender(food_feats, non_food_feats, prep_data, target, w_est, row_an
     # print(f'Running with seed: {seed}')
     # rng = np.random.default_rng(seed)
 
-    #mlflow.log_text('['+", ".join(full_feats) + "]", "full_feats_list.txt")
-
     current_column_names = list(prep_data.columns) # food_feats + non_food_feats
-    mlflow.log_text('['+", ".join(current_column_names) + "]", "full_feats_list.txt")
+    write_text_artifact("full_feats_list.txt", "[" + ", ".join(current_column_names) + "]")
 
     # current_column_names2 = food_feats + non_food_feats
     # current_column_names = row_and_col_names

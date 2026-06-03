@@ -1,0 +1,8 @@
+- experiment=INDUSTRY_RECOMMENDER
+- solver=hc_predictor_ce
+- problem=FRED_16country_monthly/industry_eu_aut
+- solver.lambda1=0.01
+- solver.lambda2=0.01
+- solver.ci_threshold=0.0001
+- solver.nonzero_threshold=0.01
+- solver.ci_add_shielded_collider_dependence=true

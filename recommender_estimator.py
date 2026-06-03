@@ -11,13 +11,17 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 
-from nn_lagrangian import fit_aug_lagrangian_nn_constraint
+from hc_predictor import fit_aug_lagrangian_nn_constraint as fit_hc_lagrangian_nn_constraint
+from nn_causal_constraints_lagrangian import (
+    fit_aug_lagrangian_nn_constraint as fit_ci_ce_lagrangian_nn_constraint,
+)
 import solve_milp
 from compute_tools import percentile_mask
 from xgboost_lagrangian import fit_aug_lagrangian_W_constraint
 from xgboost import XGBRegressor
 
 import torch
+from omegaconf import open_dict
 
 
 @torch.no_grad
@@ -65,9 +69,30 @@ class RecommenderBaseEstimator(BaseEstimator):
             y = y[mask]
         return mask, X, y
 
+    def get_current_column_names(self, X):
+        if hasattr(X, "columns"):
+            return [str(col) for col in X.columns]
+
+        current_feature_names = []
+
+        for i in range(X.shape[1]):
+            col_data = X[:, i]
+            for col_name in self.prep_data.columns:
+                if col_name in current_feature_names:
+                    continue
+                it = iter(self.prep_data[col_name])
+                if all(any(a == b for a in it) for b in col_data):
+                    current_feature_names.append(col_name)
+                    break
+
+        return current_feature_names
+
 
 class XGBRecommenderPredictor(RecommenderBaseEstimator):
     def get_current_column_names(self, X):
+        if hasattr(X, "columns"):
+            return [str(col) for col in X.columns]
+
         # SFS posílá X jako numpy array s vyházenými řádky a sloupci
         current_feature_names = []
 
@@ -174,27 +199,19 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
 
 
 class HCRecommenderPredictor(RecommenderBaseEstimator):
-    def get_current_column_names(self, X):
-        current_feature_names = []
-
-        for i in range(X.shape[1]):
-            col_data = X[:, i]
-            breakpoint()
-            for col_name in self.prep_data.columns:
-                if col_name in current_feature_names:
-                    continue
-                it = iter(self.prep_data[col_name])
-                if all(any(a == b for a in it) for b in col_data):
-                    current_feature_names.append(col_name)
-                    break
-
-        return current_feature_names
+    fit_lagrangian_nn_constraint = staticmethod(fit_hc_lagrangian_nn_constraint)
+    inject_ci_context = False
 
     def fit(self, X, y=None):
         _, X, y = self.preprocess_data(X, y)
     # self._y_train_mean_ = y.mean()
+        current_column_names = self.get_current_column_names(X)
         self.scaler_ = StandardScaler()
         X = self.scaler_.fit_transform(X)
+        if self.inject_ci_context:
+            with open_dict(self.cfg):
+                self.cfg.current_feature_names = list(current_column_names)
+                self.cfg.current_target_name = self.target_col
         self._y_mean = y.mean()
         self._y_std = y.std()
         y = (y - self._y_mean) / self._y_std
@@ -207,7 +224,6 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             #     w_est = np.zeros((d,d))
             # else:
             # print("max X", X.max(), "min X", X.min())
-            current_column_names = self.get_current_column_names(X)
             G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
             # print(G.nodes())
             # print(current_column_names + [self.target_col])
@@ -228,15 +244,12 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
         else:
             # breakpoint()
             row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-            # temp fix cause the line below doesn't work
-            # idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
-            idx_list = list(row_and_col_names_indices.values())
+            idx_list = [row_and_col_names_indices[f] for f in current_column_names]
             predict_idx = row_and_col_names_indices[self.target_col]
-            idx_list.pop(predict_idx)
             w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
             self._w_est = w_est
-                
-        self._rf_model_, lam = fit_aug_lagrangian_nn_constraint(X, y, w_est, self.cfg)
+
+        self._rf_model_, lam = self.fit_lagrangian_nn_constraint(X, y, w_est, self.cfg)
 
         return self
         
@@ -252,6 +265,14 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             return super().predict(X)
 
 
+class HCCIRecommenderPredictor(HCRecommenderPredictor):
+    fit_lagrangian_nn_constraint = staticmethod(fit_ci_ce_lagrangian_nn_constraint)
+    inject_ci_context = True
+
+
+class HCCERecommenderPredictor(HCRecommenderPredictor):
+    fit_lagrangian_nn_constraint = staticmethod(fit_ci_ce_lagrangian_nn_constraint)
+    inject_ci_context = True
 
 
 class REGRecommenderPredictor(RecommenderBaseEstimator):
