@@ -1,8 +1,13 @@
 import numpy as np
 import logging
+import pandas as pd
 from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import cross_validate
+from sklearn.model_selection import KFold, StratifiedKFold, cross_validate
+try:
+    from sklearn.model_selection import StratifiedGroupKFold
+except ImportError:  # pragma: no cover - older sklearn fallback.
+    StratifiedGroupKFold = None
 import torch
 
 
@@ -40,6 +45,149 @@ def get_mean_average_errors(prep_data, run_feats, target_col, w_est, row_and_col
 
 
 from time import time
+
+
+def _make_site_gender_cv_splits(prep_data, target_col, n_splits, solver_cfg=None):
+    n_splits = int(n_splits)
+    random_state = int(getattr(solver_cfg, "cv_random_state", 2227070966)) if solver_cfg is not None else 2227070966
+
+    site_col = "site_numeric" if "site_numeric" in prep_data.columns else None
+    if site_col is None and "site_continental" in prep_data.columns:
+        site_col = "site_continental"
+    gender_col = "gender_numeric" if "gender_numeric" in prep_data.columns else None
+
+    if site_col is None or gender_col is None:
+        logging.warning(
+            "Site/gender stratified CV requested but site or gender column is missing; "
+            "falling back to shuffled KFold."
+        )
+        splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        return list(splitter.split(np.arange(len(prep_data)))), "kfold"
+
+    site_labels = prep_data[site_col].round().astype("Int64").astype(str)
+    gender_labels = prep_data[gender_col].round().astype("Int64").astype(str)
+    n_target_bins = int(getattr(solver_cfg, "cv_target_bins", n_splits)) if solver_cfg is not None else n_splits
+    target_bins = None
+    if target_col in prep_data.columns:
+        try:
+            target_bins = (
+                pd.qcut(
+                    prep_data[target_col],
+                    q=min(n_target_bins, prep_data[target_col].nunique()),
+                    labels=False,
+                    duplicates="drop",
+                )
+                .astype("Int64")
+                .astype(str)
+            )
+        except ValueError:
+            target_bins = None
+
+    target_bin_info = None
+    if target_bins is not None:
+        target_bin_info = {
+            "target_col": target_col,
+            "n_target_bins": int(target_bins.nunique()),
+            "target_bin_counts": target_bins.value_counts().sort_index().to_dict(),
+        }
+
+    candidate_strata = []
+    if target_bins is not None:
+        candidate_strata.append(
+            ("site_gender_target_bin", site_labels + "_" + gender_labels + "_" + target_bins)
+        )
+    candidate_strata.append(("site_gender", site_labels + "_" + gender_labels))
+    if target_bins is not None:
+        candidate_strata.append(("gender_target_bin", gender_labels + "_" + target_bins))
+        candidate_strata.append(("site_target_bin", site_labels + "_" + target_bins))
+        candidate_strata.append(("target_bin", target_bins))
+    candidate_strata.append(("gender", gender_labels))
+    candidate_strata.append(("site", site_labels))
+
+    strata_name = None
+    strata = None
+    stratum_counts = None
+    for candidate_name, candidate in candidate_strata:
+        candidate_counts = candidate.value_counts()
+        if candidate_counts.min() >= n_splits:
+            strata_name = candidate_name
+            strata = candidate
+            stratum_counts = candidate_counts
+            break
+
+    if strata is None:
+        strata_name, strata = candidate_strata[-1]
+        stratum_counts = strata.value_counts()
+        logging.warning(
+            "No stratification label has at least n_splits=%d samples in every class; "
+            "using %s and falling back to shuffled KFold if sklearn rejects it. Counts: %s",
+            n_splits,
+            strata_name,
+            stratum_counts.to_dict(),
+        )
+    elif strata_name != "site_gender_target_bin":
+        logging.warning(
+            "Site/gender/target-bin CV is too sparse for n_splits=%d; using coarser "
+            "stratification '%s' instead. Counts: %s",
+            n_splits,
+            strata_name,
+            stratum_counts.to_dict(),
+        )
+
+    groups = prep_data["ID"].to_numpy() if "ID" in prep_data.columns else np.arange(len(prep_data))
+    if StratifiedGroupKFold is not None:
+        splitter = StratifiedGroupKFold(
+            n_splits=n_splits,
+            shuffle=True,
+            random_state=random_state,
+        )
+        try:
+            splits = list(splitter.split(np.arange(len(prep_data)), strata.to_numpy(), groups))
+        except ValueError as exc:
+            logging.warning(
+                "StratifiedGroupKFold failed (%s); falling back to shuffled KFold.",
+                exc,
+            )
+            splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+            return list(splitter.split(np.arange(len(prep_data)))), "kfold"
+        split_kind = "stratified_group_kfold"
+    else:
+        splitter = StratifiedKFold(
+            n_splits=n_splits,
+            shuffle=True,
+            random_state=random_state,
+        )
+        splits = list(splitter.split(np.arange(len(prep_data)), strata.to_numpy()))
+        split_kind = "stratified_kfold"
+
+    fold_summary = []
+    for fold_idx, (_, test_idx) in enumerate(splits, start=1):
+        fold_summary.append(
+            {
+                "fold": fold_idx,
+                "n_test": int(len(test_idx)),
+                "site_gender_counts": strata.iloc[test_idx].value_counts().sort_index().to_dict(),
+            }
+        )
+    logging.info(
+        "Using %s stratified by %s: %s",
+        split_kind,
+        strata_name,
+        fold_summary,
+    )
+    write_yaml_artifact(
+        "cv_site_gender_split_summary.yaml",
+        {
+            "cv": split_kind,
+            "strata_name": strata_name,
+            "site_col": site_col,
+            "gender_col": gender_col,
+            "target_bin_info": target_bin_info,
+            "strata_counts": stratum_counts.sort_index().to_dict(),
+            "folds": fold_summary,
+        },
+    )
+    return splits, split_kind
 
 
 def run_feature_selection(prep_data, model_name,custom_objective,
@@ -162,13 +310,15 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         X = X[full_feats]
 
     logging.info(f"Testing on columns {len(X.columns)}: {X.columns}")
+    cv_splits, cv_kind = _make_site_gender_cv_splits(prep_data, target_col, n_runs, solver_cfg)
+    logging.info("Using CV splitter for model evaluation: %s", cv_kind)
 
     if 'feature_selector' in solver_cfg and solver_cfg.feature_selector == 'SequentialFeatureSelector':
         sfs = SequentialFeatureSelector(
             model,
             direction="forward",
             scoring=compute_predictor_errors_scikit,
-            cv=n_runs,
+            cv=cv_splits,
             n_features_to_select=n_features
         )
 
@@ -187,15 +337,48 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         
     else:
         model.fit(X, y)
-        X_selected = X.to_numpy()
-        best_features = full_feats
+        validation_history = getattr(model, "validation_history_", None)
+        if validation_history:
+            write_yaml_artifact(
+                "validation_history.yaml",
+                {
+                    "fit": validation_history,
+                    "best_validation_loss": getattr(model._rf_model_, "best_validation_loss_", None),
+                    "best_validation_outer": getattr(model._rf_model_, "best_validation_outer_", None),
+                    "restore_best_validation_model": getattr(
+                        model._rf_model_, "restore_best_validation_model_", None
+                    ),
+                },
+            )
+        # Keep column names for estimators that need to align a reused W_est
+        # with the current CV fold features.
+        X_selected = X
+        best_features = list(X.columns)
         w_est = model._w_est
 
     results = cross_validate(model, X_selected, y,
-        cv=n_runs,
+        cv=cv_splits,
         scoring=(lambda estimator, X, y: compute_predictor_errors_and_cs_scikit(estimator, X, y, estimator._w_est)) if isinstance(model, HCRecommenderPredictor) else compute_predictor_errors_scikit,
-        return_train_score=True
+        return_train_score=True,
+        return_estimator=True,
     )
+    cv_validation_history = []
+    for fold_idx, estimator in enumerate(results.get("estimator", []), start=1):
+        history = getattr(estimator, "validation_history_", None)
+        if history:
+            cv_validation_history.append(
+                {
+                    "fold": fold_idx,
+                    "history": history,
+                    "best_validation_loss": getattr(estimator._rf_model_, "best_validation_loss_", None),
+                    "best_validation_outer": getattr(estimator._rf_model_, "best_validation_outer_", None),
+                    "restore_best_validation_model": getattr(
+                        estimator._rf_model_, "restore_best_validation_model_", None
+                    ),
+                }
+            )
+    if cv_validation_history:
+        write_yaml_artifact("cv_validation_history.yaml", cv_validation_history)
 
     if model_name == 'HC':
         # add fit call to get the graph for selected features

@@ -10,3 +10,7 @@ PC/
 model.pt
 *.DS_Store
 *.log
+old/
+OECD/
+tmp_summary_check/
+spbm/

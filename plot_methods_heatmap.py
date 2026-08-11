@@ -13,7 +13,7 @@ import pandas as pd
 ROOT = Path("/Users/xiaoyuhe/Recommender_Pavel")
 PROBLEM_GROUP = os.environ.get("PROBLEM_GROUPS", "FRED_16country_monthly").split(",")[0].strip()
 REPORT_FAMILY = PROBLEM_GROUP.split("_", 1)[0]
-BASE_DIR = ROOT / "reports" / REPORT_FAMILY
+BASE_DIR = ROOT / "reports" / REPORT_FAMILY / PROBLEM_GROUP
 OUTPUT_DIR = Path(os.environ.get("PLOT_OUTPUT_DIR", str(ROOT / "reports" / "plots" / PROBLEM_GROUP)))
 OUTPUT_PLOT = OUTPUT_DIR / f"{PROBLEM_GROUP}_all_methods_heatmap.png"
 OUTPUT_TABLE = OUTPUT_DIR / f"{PROBLEM_GROUP}_all_methods_heatmap.csv"
@@ -90,10 +90,14 @@ def load_matrix() -> tuple[pd.DataFrame, pd.DataFrame]:
         .reindex(columns=target_order)
     )
 
-    # Sort methods by overall mean, ignoring missing values.
-    method_order = (
-        long_df.groupby("method")["test_mean"].mean().sort_values(ascending=True).index.tolist()
+    # Sort both axes from larger to smaller so the heatmap decreases left->right and bottom->top.
+    column_order = (
+        long_df.groupby("target")["test_mean"].mean().sort_values(ascending=False).index.tolist()
     )
+    method_order = (
+        long_df.groupby("method")["test_mean"].mean().sort_values(ascending=False).index.tolist()
+    )
+    pivot = pivot.reindex(columns=[target for target in column_order if target in pivot.columns])
     pivot = pivot.reindex(method_order)
 
     label_map = long_df.drop_duplicates("method").set_index("method")["method_label"].to_dict()
@@ -120,8 +124,8 @@ def plot_heatmap(pivot: pd.DataFrame) -> None:
     ax.set_yticks(np.arange(len(pivot.index)))
     ax.set_yticklabels(pivot.index, fontsize=11)
     ax.set_xlabel("target", fontsize=14)
-    ax.set_ylabel("method", fontsize=14)
-    ax.set_title(f"{PROBLEM_GROUP}: test_mean by country and method", fontsize=17, pad=14)
+    # ax.set_ylabel("method", fontsize=14)
+    # ax.set_title(f"{PROBLEM_GROUP}: test_mean by country and method", fontsize=17, pad=14)
 
     # Cell annotations.
     for i in range(pivot.shape[0]):

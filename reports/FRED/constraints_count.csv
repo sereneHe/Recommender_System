@@ -1,0 +1,6 @@
+method,independence_min,independence_max,dependence_min,dependence_max
+hc_predictor_ce,120,120,0,0
+hc_predictor_ce_ceThreshold_0.05,42,42,29,29
+hc_predictor_ce_milpLambda_0.05,8,8,12,12
+hc_predictor_ce_shielded_collider,8,8,467,467
+hc_predictor_ce_shielded_collider_limit,8,8,16,39

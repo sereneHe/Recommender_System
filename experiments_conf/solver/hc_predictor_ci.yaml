@@ -4,8 +4,8 @@ custom_objective: lagrange
 N_SELECT_FEATURES: 5
 n_runs: 5
 recalculate_dag: true
-
-feature_selector: SequentialFeatureSelector
+# feature_selector: SequentialFeatureSelector
+feature_selector: none
 
 n_outer: 10
 n_inner: 100

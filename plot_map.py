@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import colorsys
 import re
 import subprocess
@@ -50,22 +51,22 @@ COUNTRY_META = {
 }
 
 LABEL_OFFSETS = {
-    'AUT': (0.3, 0.9),
-    'BEL': (-0.8, 0.7),
-    'DEU': (0.2, 1.0),
-    'ESP': (-0.2, 0.9),
-    'EST': (0.6, 0.9),
-    'FIN': (0.8, 1.2),
-    'FRA': (-0.4, 0.9),
-    'GRC': (0.9, -0.4),
+    'AUT': (-1.0, 1.0),
+    'BEL': (-2.2, 1.1),
+    'DEU': (1.8, 2.5),
+    'ESP': (-1.0, 1.5),
+    'EST': (1.8, 1.2),
+    'FIN': (0.2, 2.0),
+    'FRA': (-0.8, -1.4),
+    'GRC': (2.2, -1.5),
     'IRL': (-1.0, 0.7),
-    'ITA': (0.7, 0.6),
-    'LTU': (0.7, 0.8),
-    'LUX': (0.8, 0.2),
-    'NLD': (0.8, 0.7),
-    'PRT': (-0.8, 0.5),
-    'SVK': (0.9, 0.5),
-    'SVN': (0.9, -0.2),
+    'ITA': (-1.2, -1.0),
+    'LTU': (3.5, 0.8),
+    'LUX': (-2.4, -1.3),
+    'NLD': (-2.8, 2.2),
+    'PRT': (-1.5, 0.8),
+    'SVK': (2.4, -1.0),
+    'SVN': (-1.5, -1.2),
 }
 
 def parse_args() -> argparse.Namespace:
@@ -75,8 +76,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--w-matrix', type=Path, default=None)
     parser.add_argument('--config', type=Path, default=None)
     parser.add_argument('--selected-features', type=Path, default=None)
-    parser.add_argument('--edge-threshold', type=float, default=0.05)
-    parser.add_argument('--top-k-edges', type=int, default=20)
+    parser.add_argument(
+        '--filter-edges',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Filter edges by --edge-threshold and --top-k-edges (default: enabled).',
+    )
+    parser.add_argument('--edge-threshold', type=float, default=0.1)
+    parser.add_argument('--top-k-edges', type=int, default=10)
     parser.add_argument('--grid-output', type=Path, default=DEFAULT_GRID_PNG_OUTPUT)
     parser.add_argument('--grid-industry-targets', action='store_true')
     parser.add_argument('--multirun-dir', type=Path, default=ROOT / 'multirun/2026-03-27/20-22-28')
@@ -170,7 +177,13 @@ def infer_labels(w: np.ndarray, selected: list[str], target: str | None) -> list
     )
 
 
-def build_edge_table(w: np.ndarray, labels: list[str], threshold: float, top_k: int) -> pd.DataFrame:
+def build_edge_table(
+    w: np.ndarray,
+    labels: list[str],
+    threshold: float,
+    top_k: int,
+    filter_edges: bool = True,
+) -> pd.DataFrame:
     rows = []
     for i, src in enumerate(labels):
         for j, dst in enumerate(labels):
@@ -178,13 +191,18 @@ def build_edge_table(w: np.ndarray, labels: list[str], threshold: float, top_k: 
                 continue
             weight = float(w[i, j])
             abs_weight = abs(weight)
-            if abs_weight < threshold:
+            if abs_weight == 0.0:
+                continue
+            if filter_edges and abs_weight < threshold:
                 continue
             rows.append({'source': src, 'target': dst, 'weight': weight, 'abs_weight': abs_weight})
     edges = pd.DataFrame(rows)
     if edges.empty:
         return edges
-    edges = edges.sort_values('abs_weight', ascending=False).head(top_k).reset_index(drop=True)
+    edges = edges.sort_values('abs_weight', ascending=False)
+    if filter_edges:
+        edges = edges.head(top_k)
+    edges = edges.reset_index(drop=True)
     return edges
 
 
@@ -211,7 +229,7 @@ def parse_best_features_from_log(log_path: Path) -> list[str]:
 def add_edge_traces(fig: go.Figure, edges: pd.DataFrame) -> None:
     if edges.empty:
         return
-    max_w = edges['abs_weight'].max()
+    max_w = max(float(edges['abs_weight'].max()), np.finfo(float).eps)
     for _, row in edges.iterrows():
         src_meta = COUNTRY_META.get(row['source'])
         dst_meta = COUNTRY_META.get(row['target'])
@@ -229,35 +247,54 @@ def add_edge_traces(fig: go.Figure, edges: pd.DataFrame) -> None:
         curve_strength = min(1.2, 0.14 * norm)
         cx = (sx + tx) / 2 + px * curve_strength
         cy = (sy + ty) / 2 + py * curve_strength
-        ts = np.linspace(0.0, 1.0, 30)
+        ts = np.linspace(0.0, 1.0, 100)
         lons = (1 - ts) ** 2 * sx + 2 * (1 - ts) * ts * cx + ts ** 2 * tx
         lats = (1 - ts) ** 2 * sy + 2 * (1 - ts) * ts * cy + ts ** 2 * ty
-        
-        arrow_len = 0.42
-        arrow_w = 0.14
-        marker_radius = 0.55
-        arrow_tip_offset = 0.04
 
-        # Calculate the direction of the last segment of the curve
-        end_dx = tx - lons[-2]
-        end_dy = ty - lats[-2]
-        end_norm = (end_dx ** 2 + end_dy ** 2) ** 0.5
-        if end_norm == 0:
+        # Measure the curve in an equirectangular projection so trimming and
+        # arrow geometry remain visually consistent across Europe.
+        lon_scale = max(np.cos(np.deg2rad((sy + ty) / 2)), 0.2)
+        metric_x = lons * lon_scale
+        metric_y = lats
+        segment_lengths = np.hypot(np.diff(metric_x), np.diff(metric_y))
+        cumulative = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+        total_length = float(cumulative[-1])
+
+        # Keep both the shaft and arrowhead outside the country markers.
+        # Stronger edges are wider, so give them proportionally more clearance.
+        source_radius = 0.44 + 0.025 * width
+        target_radius = 0.50 + 0.03 * width
+        arrow_length = min(0.52, total_length * 0.16)
+        arrow_half_width = min(0.18, arrow_length * 0.38)
+        start_distance = source_radius
+        tip_distance = total_length - target_radius
+        base_distance = tip_distance - arrow_length
+        if base_distance <= start_distance:
             continue
-        
-        ux, uy = end_dx / end_norm, end_dy / end_norm
-        apx, apy = -uy, ux
 
-        # Put the tip at the destination marker edge and stop the line at the arrow base.
-        arrow_tip_x = tx - ux * (marker_radius + arrow_tip_offset)
-        arrow_tip_y = ty - uy * (marker_radius + arrow_tip_offset)
-        base_x = arrow_tip_x - ux * arrow_len
-        base_y = arrow_tip_y - uy * arrow_len
+        def point_at_distance(distance: float) -> tuple[float, float]:
+            index = int(np.searchsorted(cumulative, distance, side='right') - 1)
+            index = min(max(index, 0), len(segment_lengths) - 1)
+            segment_length = segment_lengths[index]
+            fraction = 0.0 if segment_length == 0 else (
+                (distance - cumulative[index]) / segment_length
+            )
+            lon = lons[index] + fraction * (lons[index + 1] - lons[index])
+            lat = lats[index] + fraction * (lats[index + 1] - lats[index])
+            return float(lon), float(lat)
+
+        start_x, start_y = point_at_distance(start_distance)
+        base_x, base_y = point_at_distance(base_distance)
+        tip_x, tip_y = point_at_distance(tip_distance)
+
+        interior = (cumulative > start_distance) & (cumulative < base_distance)
+        line_lons = [start_x, *lons[interior], base_x]
+        line_lats = [start_y, *lats[interior], base_y]
 
         fig.add_trace(
             go.Scattergeo(
-                lon=[*lons[:-1], base_x],
-                lat=[*lats[:-1], base_y],
+                lon=line_lons,
+                lat=line_lats,
                 mode='lines',
                 line=dict(width=width, color=color),
                 opacity=0.92,
@@ -267,19 +304,35 @@ def add_edge_traces(fig: go.Figure, edges: pd.DataFrame) -> None:
             )
         )
 
-        left_x = base_x + apx * arrow_w
-        left_y = base_y + apy * arrow_w
-        right_x = base_x - apx * arrow_w
-        right_y = base_y - apy * arrow_w
+        # Use a conventional arrowhead aimed directly at the destination,
+        # independent of the curve's terminal tangent.
+        arrow_direction_x = (tx - base_x) * lon_scale
+        arrow_direction_y = ty - base_y
+        arrow_direction_norm = np.hypot(arrow_direction_x, arrow_direction_y)
+        if arrow_direction_norm == 0:
+            continue
+        direction_x = arrow_direction_x / arrow_direction_norm
+        direction_y = arrow_direction_y / arrow_direction_norm
+        tip_x = tx - direction_x * target_radius / lon_scale
+        tip_y = ty - direction_y * target_radius
+        perpendicular_x = -arrow_direction_y / arrow_direction_norm
+        perpendicular_y = arrow_direction_x / arrow_direction_norm
+        lon_offset = perpendicular_x * arrow_half_width / lon_scale
+        lat_offset = perpendicular_y * arrow_half_width
+
+        left_x = base_x + lon_offset
+        left_y = base_y + lat_offset
+        right_x = base_x - lon_offset
+        right_y = base_y - lat_offset
 
         fig.add_trace(
             go.Scattergeo(
-                lon=[left_x, arrow_tip_x, right_x, left_x],
-                lat=[left_y, arrow_tip_y, right_y, left_y],
+                lon=[left_x, tip_x, right_x, left_x],
+                lat=[left_y, tip_y, right_y, left_y],
                 mode='lines',
                 fill='toself',
-                fillcolor=color,
-                line=dict(width=0.4, color=color),
+                fillcolor='rgba(35, 35, 35, 0.96)',
+                line=dict(width=0.5, color='rgba(25, 25, 25, 1.0)'),
                 opacity=1.0,
                 hoverinfo='skip',
                 showlegend=False,
@@ -477,7 +530,7 @@ def build_figure(
             lat=label_lat,
             text=label_text,
             mode='text',
-            textfont=dict(size=24 if width > 1500 else 15, color='#111111'),
+            textfont=dict(size=19 if width > 1500 else 12, color='#666666'),
             hoverinfo='skip',
             showlegend=False,
         )
@@ -677,6 +730,31 @@ def latest_job_by_target(jobs: list[dict]) -> list[dict]:
     return [by_target[target] for target in sorted(by_target)]
 
 
+def report_jobs(report: pd.DataFrame, jobs: list[dict]) -> list[dict]:
+    if 'run_id' not in report.columns:
+        return latest_job_by_target(jobs)
+
+    root = ROOT.resolve()
+    jobs_by_run_id = {}
+    for job in jobs:
+        job_dir = job['job_dir'].resolve()
+        if job_dir.is_relative_to(root):
+            jobs_by_run_id[job_dir.relative_to(root).as_posix()] = job
+    selected = []
+    for _, row in report.dropna(subset=['target', 'run_id']).iterrows():
+        run_id = str(row['run_id']).strip().rstrip('/')
+        job = jobs_by_run_id.get(run_id)
+        if job is None or job['target'] != str(row['target']):
+            continue
+        selected.append(job)
+
+    if len(selected) == report['target'].nunique():
+        return sorted(selected, key=lambda item: item['target'])
+
+    print('[WARN] Some report run_id values could not be resolved; falling back to latest jobs.')
+    return latest_job_by_target(jobs)
+
+
 def parse_csv_filter(value: str | None) -> set[str] | None:
     if value is None:
         return None
@@ -703,6 +781,7 @@ def write_report_adjacency_grids(
     multirun_root: Path,
     threshold: float,
     top_k: int,
+    filter_edges: bool = True,
     problem_groups: set[str] | None = None,
     solver_filters: set[str] | None = None,
     output_root: Path | None = None,
@@ -713,6 +792,7 @@ def write_report_adjacency_grids(
     print(f'[PLOT] multirun root: {multirun_root}')
     print(f'[PLOT] problem groups: {", ".join(sorted(problem_groups)) if problem_groups else "ALL"}')
     print(f'[PLOT] solvers: {", ".join(sorted(solver_filters)) if solver_filters else "ALL"}')
+    print(f'[PLOT] edge filtering: {"ON" if filter_edges else "OFF"}')
     print(f'[PLOT] dry run: {dry_run}')
 
     all_jobs = discover_all_multirun_jobs(multirun_root)
@@ -750,7 +830,7 @@ def write_report_adjacency_grids(
                 continue
             matches.append(job)
 
-        selected_jobs = latest_job_by_target(matches)
+        selected_jobs = report_jobs(report, matches)
         found_targets = {job['target'] for job in selected_jobs}
         missing_targets = sorted(targets - found_targets)
 
@@ -787,11 +867,12 @@ def write_report_adjacency_grids(
             output=output,
             threshold=threshold,
             top_k=top_k,
+            filter_edges=filter_edges,
         )
         written_outputs.add(output)
 
 
-def write_panel_image(fig: go.Figure, output: Path, width: int, height: int) -> None:
+def write_panel_image(fig: go.Figure, output: Path, width: int, height: int) -> Path:
     fig_json = output.with_suffix('.json')
     svg_path = output.with_suffix('.svg')
     fig_json.write_text(fig.to_json())
@@ -825,7 +906,53 @@ def write_panel_image(fig: go.Figure, output: Path, width: int, height: int) -> 
         )
     finally:
         fig_json.unlink(missing_ok=True)
-        svg_path.unlink(missing_ok=True)
+    return svg_path
+
+
+def write_vector_grid(
+    panel_paths: list[Path],
+    output: Path,
+    cols: int,
+    panel_width: int,
+    panel_height: int,
+) -> None:
+    rows = (len(panel_paths) + cols - 1) // cols
+    width = cols * panel_width
+    height = rows * panel_height
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'xmlns:xlink="http://www.w3.org/1999/xlink" '
+            f'width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+            f'data-dpi="{PNG_DPI}">'
+        ),
+        '<rect width="100%" height="100%" fill="white"/>',
+    ]
+    for idx, panel_path in enumerate(panel_paths):
+        row, col = divmod(idx, cols)
+        x = col * panel_width
+        y = row * panel_height
+        encoded = base64.b64encode(panel_path.read_bytes()).decode('ascii')
+        parts.append(
+            f'<image x="{x}" y="{y}" width="{panel_width}" height="{panel_height}" '
+            f'href="data:image/svg+xml;base64,{encoded}"/>'
+        )
+        parts.append(
+            f'<rect x="{x}" y="{y}" width="{panel_width}" height="{panel_height}" '
+            'fill="none" stroke="#D9D9D9" stroke-width="2"/>'
+        )
+    parts.append('</svg>')
+
+    svg_output = output.with_suffix('.svg')
+    pdf_output = output.with_suffix('.pdf')
+    svg_output.write_text('\n'.join(parts))
+    subprocess.run(
+        ['/usr/local/bin/rsvg-convert', '-f', 'pdf', '-o', str(pdf_output), str(svg_output)],
+        check=True,
+    )
+    print(f'Wrote {svg_output}')
+    print(f'Wrote {pdf_output}')
 
 
 def write_target_grid(
@@ -835,6 +962,7 @@ def write_target_grid(
     output: Path,
     threshold: float,
     top_k: int,
+    filter_edges: bool = True,
 ) -> None:
     if not jobs:
         print(f'No completed jobs available for {output.name}')
@@ -849,8 +977,15 @@ def write_target_grid(
     with tempfile.TemporaryDirectory(prefix='industry-target-grid-') as tmpdir:
         tmpdir_path = Path(tmpdir)
         panel_paths: list[Path] = []
+        panel_svg_paths: list[Path] = []
         for job in jobs:
-            edges = build_edge_table(job['w'], job['labels'], threshold, top_k)
+            edges = build_edge_table(
+                job['w'],
+                job['labels'],
+                threshold,
+                top_k,
+                filter_edges=filter_edges,
+            )
             plot_df, size = build_plot_df(values, job['target'])
             fig = build_figure(
                 plot_df,
@@ -863,7 +998,7 @@ def write_target_grid(
                 height=panel_height,
             )
             panel_path = tmpdir_path / f"{job['target']}.png"
-            write_panel_image(fig, panel_path, panel_width, panel_height)
+            panel_svg_paths.append(write_panel_image(fig, panel_path, panel_width, panel_height))
             panel_paths.append(panel_path)
 
         canvas = Image.new('RGB', (GRID_CANVAS_WIDTH, GRID_CANVAS_HEIGHT), 'white')
@@ -882,6 +1017,13 @@ def write_target_grid(
         canvas = fit_image_to_canvas(canvas, GRID_CANVAS_WIDTH, GRID_CANVAS_HEIGHT)
         canvas.save(output, dpi=(PNG_DPI, PNG_DPI))
         print(f'Wrote {output}')
+        write_vector_grid(
+            panel_svg_paths,
+            output,
+            cols=cols,
+            panel_width=panel_width,
+            panel_height=panel_height,
+        )
 
 
 def main() -> None:
@@ -892,6 +1034,7 @@ def main() -> None:
             multirun_root=args.multirun_root,
             threshold=args.edge_threshold,
             top_k=args.top_k_edges,
+            filter_edges=args.filter_edges,
             problem_groups=parse_csv_filter(args.problem_group),
             solver_filters=parse_csv_filter(args.solver),
             output_root=args.output_root,
@@ -904,8 +1047,24 @@ def main() -> None:
         jobs = discover_multirun_jobs(args.multirun_dir)
         jobs9 = [job for job in jobs if job['problem_size'] == 9]
         jobs16 = [job for job in jobs if job['problem_size'] == 16]
-        write_target_grid(jobs9, cols=3, rows=3, output=args.grid_9_output, threshold=args.edge_threshold, top_k=args.top_k_edges)
-        write_target_grid(jobs16, cols=4, rows=4, output=args.grid_16_output, threshold=args.edge_threshold, top_k=args.top_k_edges)
+        write_target_grid(
+            jobs9,
+            cols=3,
+            rows=3,
+            output=args.grid_9_output,
+            threshold=args.edge_threshold,
+            top_k=args.top_k_edges,
+            filter_edges=args.filter_edges,
+        )
+        write_target_grid(
+            jobs16,
+            cols=4,
+            rows=4,
+            output=args.grid_16_output,
+            threshold=args.edge_threshold,
+            top_k=args.top_k_edges,
+            filter_edges=args.filter_edges,
+        )
         return
 
     df = pd.read_csv(args.data_path)
@@ -920,7 +1079,13 @@ def main() -> None:
     selected = parse_selected_features(sel_path)
     target = parse_target_from_config(cfg_path)
     labels = infer_labels(w, selected, target)
-    edges = build_edge_table(w, labels, args.edge_threshold, args.top_k_edges)
+    edges = build_edge_table(
+        w,
+        labels,
+        args.edge_threshold,
+        args.top_k_edges,
+        filter_edges=args.filter_edges,
+    )
 
     write_grid_overview(values, target, edges, args.grid_output)
     print(f'Using W matrix: {w_path}')

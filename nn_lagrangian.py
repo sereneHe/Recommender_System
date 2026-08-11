@@ -32,8 +32,9 @@ class MLPRegressor(nn.Module):
 
 
 def fit_aug_lagrangian_nn_constraint(
-    X, y, W, cfg, verbose=False, device="cpu",
+    X, y, W, cfg, verbose=False, device="cpu", X_val=None, y_val=None,
 ):
+    del X_val, y_val
     torch.set_default_dtype(torch.float32)
 
     X = torch.tensor(np.asarray(X), dtype=torch.float32, device=device)

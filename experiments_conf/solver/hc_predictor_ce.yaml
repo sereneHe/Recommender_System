@@ -1,15 +1,23 @@
 name: hc_predictor_ce
 model_name: HC-CE
 custom_objective: lagrange
-N_SELECT_FEATURES: 5
+N_SELECT_FEATURES: 16
 n_runs: 5
+cv_target_bins: 3
 recalculate_dag: true
-feature_selector: SequentialFeatureSelector
+#feature_selector: SequentialFeatureSelector
+feature_selector: none
 
 n_outer: 10
 n_inner: 100
 hidden_dim: 32
 depth: 2
+use_validation: true
+validation_fraction: 0.2
+validation_random_state: 0
+validation_min_delta: 0.0
+early_stopping_patience: 0
+restore_best_validation_model: true
 
 # MILP parameters
 loss_type: l2
@@ -18,7 +26,7 @@ a_reg_type: l1
 lambda1: 0.01
 lambda2: 0.01
 lr_decay: 0.95
-nonzero_threshold: 0.05
+nonzero_threshold: 0.01
 constraints_mode: weights
 callback_mode: all_cycles
 robust: false
@@ -34,7 +42,12 @@ debug: false
 
 # Conditional independence penalty parameters
 use_ci_penalty: true
-ci_penalty_kind: conditional_expectation
+ci_penalty_kind: discrete_conditional_independence
+# Strict discrete CI diagnostic uses hard quantile bins; the trainable loss uses
+# a soft quantile-bin conditional mutual information approximation.
+ci_discrete_n_bins: 4
+ci_discrete_soft_temperature: 0.2
+ci_discrete_max_z_states: 256
 # CE constraint backend:
 # - alm_pbm: independence uses ALM equality, dependence uses PBM inequality.
 # - alm_all: independence and dependence both use ALM equality-style constraints.
@@ -42,20 +55,21 @@ ci_penalty_kind: conditional_expectation
 ce_constraint_backend: alm_pbm
 ci_mode: manual
 ci_manual_from_training_dag: true
-ci_threshold: 0.05
+#ci_threshold: 0.0001
+ci_threshold: 0.1
 ci_skip_if_direct_edge: true
 ci_add_dsep_independence: true
+ci_add_collider_marginal_independence: true
 
 #shielded_collider
 ci_add_shielded_collider_dependence: true
-# Turn this on to use the shielded-collider anti-lock preset below.
-ci_use_shielded_collider_limits: false
+ci_use_shielded_collider_limits: true
 ci_shielded_dependent_margin: 0.01
 ci_max_shielded_constraints_per_collider: 2
 ci_max_shielded_constraints_per_target: 4
 ci_shielded_exclude_target_in_pair: true
 
-ci_max_dsep_separator_size: null
+ci_max_dsep_separator_size: 3
 ci_dependent_margin: 0.05
 ce_independence_tolerance: 0.0
 ce_use_balanced_batches: true
@@ -64,9 +78,17 @@ ce_batch_size: 128
 ce_sensitive_group_source: auto
 ce_sensitive_bins: 4
 ce_discrete_max_groups: 20
+ce_pbm_backend: stochastic_pbm
+ci_pbm_pbf: quadratic_logarithmic
+ci_pbm_dual_ema_gamma: 0.9
+# Aliases matching the SPBM examples under spbm/.
+ci_pbm_gamma: 0.9
+ci_pbm_penalty_mult: 0.95
 ci_pbm_mu: 0.3
 ci_pbm_lr: 0.95
-ci_pbm_penalty_update: const
+ci_pbm_penalty_update: adapt
+ci_pbm_epoch_len: 100
+ci_pbm_adapt_delta: 1.5
 ci_pbm_init_duals: 0.01
 ci_pbm_init_penalties: 1.0
 ci_pbm_penalty_range:
@@ -75,6 +97,23 @@ ci_pbm_penalty_range:
 ci_pbm_dual_range:
   - 0.01
   - 100.0
+
+# Unified stochastic constrained optimizer controls.
+# Prox is injected into parameter gradients like PBM.py / ssl_alm_adam.py modified Adam.
+use_stochastic_constrained_optimizer: true
+sco_prox_mu: 0.3
+sco_prox_center_decay: 0.5
+sco_dual_ema_gamma: 0.0
+sco_use_adaptive_penalty: false
+sco_penalty_violation_tol: 0.0
+sco_alm_penalty_mult: 1.05
+sco_pbm_penalty_mult: 0.95
+sco_alm_penalty_range:
+  - 0.000001
+  - 1000000.0
+sco_pbm_penalty_range:
+  - 0.000001
+  - 1000000.0
 # NN parameters
 constrained: true
 use_w_constraints: true

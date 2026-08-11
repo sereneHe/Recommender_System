@@ -1,0 +1,67 @@
+name: codiet
+target: 'HDL (mg/dL)'
+
+features:
+  # confounders
+  - age
+  - gender_numeric
+  - site_continental
+
+  # Blood cholesterol / lipid markers
+  - CHOL (mg/dL)
+  - LDL (mg/dL)
+  - TRIG (mg/dL)
+
+  # Metabolome / lipidomics
+  - dbs_rbc_lip_d-dgla-20-3n6
+  - dbs_rbc_lip_d-dha-22-6n3
+  - dbs_rbc_lip_d-epa-dha
+  - dbs_rbc_lip_d-linoleic-18-2n6
+  - dbs_rbc_lip_d-omega-6
+  - dbs_rbc_lip_d-palmitoleic-16-1n7
+  - dbs_rbc_lip_d-sfa
+  - dbs_rbc_lip_rbc-eicosadienoic-20-2n6
+  - ms_lip_fahfa-17:0/18:0
+  - ms_lip_lnape-18:2/n-18:2
+  - ms_lip_lpe-18:2
+  - ms_lip_pe-o-19:1-20:4
+  - ms_lip_pe-o-20:2-22:6
+  - ms_serum_histidine
+  - ms_serum_ornithine
+  - ms_urine_4-hydroxyproline
+  - ms_urine_glutamic-acid
+  - ms_urine_glutamine
+  - ms_urine_phenylalanine
+  - ms_urine_tyrosine
+  - nmr_urine_1-methylhistidine
+  - nmr_urine_2-furoylglycine
+  - nmr_urine_2-methylsuccinic-acid
+  - nmr_urine_4-aminobutyric-acid
+  - nmr_urine_acetone
+  - nmr_urine_adenosine
+  - nmr_urine_benzoic-acid
+  - nmr_urine_d-mannose
+  - nmr_urine_guanidinoacetic-acid
+  - nmr_urine_myo-inositol
+  - nmr_urine_oxaloacetic-acid
+  - nmr_urine_trigonelline
+
+  # Gut microbiome
+  - microb_4cl_label_1
+  - microb_4cl_label_2
+  - microb_4cl_label_3
+  - microb_clean15_trnk_k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Bacteroidaceae|g__Phocaeicola
+  - microb_clean15_trnk_k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Prevotellaceae|g__Prevotella
+  - microb_clean15_trnk_k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Rikenellaceae|g__Alistipes
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Clostridiaceae|g__Clostridium
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Fusicatenibacter
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Mediterraneibacter
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Roseburia
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Oscillospiraceae|g__Faecalibacterium
+  - microb_large_emb_coord_14
+  - microb_large_emb_coord_15
+  - microb_large_emb_coord_18
+  - microb_large_emb_coord_2
+  - microb_phyl4cl_label_1
+  - microb_phyl4cl_label_2
+  - microb_phyl4cl_label_3

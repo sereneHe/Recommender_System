@@ -12,7 +12,7 @@ import pandas as pd
 ROOT = Path("/Users/xiaoyuhe/Recommender_Pavel")
 PROBLEM_GROUP = os.environ.get("PROBLEM_GROUPS", "FRED_16country_monthly").split(",")[0].strip()
 REPORT_FAMILY = PROBLEM_GROUP.split("_", 1)[0]
-BASE_DIR = ROOT / "reports" / REPORT_FAMILY
+BASE_DIR = ROOT / "reports" / REPORT_FAMILY / PROBLEM_GROUP
 OUTPUT_DIR = Path(os.environ.get("PLOT_OUTPUT_DIR", str(ROOT / "reports" / "plots" / PROBLEM_GROUP)))
 OUTPUT_PLOT = OUTPUT_DIR / f"{PROBLEM_GROUP}_test_mean.png"
 OUTPUT_TABLE = OUTPUT_DIR / f"{PROBLEM_GROUP}_test_mean.csv"
@@ -144,9 +144,10 @@ def plot_summary(summary: pd.DataFrame) -> None:
         capsize=4,
     )
 
-    for y, mean, sd in zip(y_positions, summary["test_mean_mean"], summary["test_mean_sd"]):
+    for idx, (y, mean, sd) in enumerate(zip(y_positions, summary["test_mean_mean"], summary["test_mean_sd"])):
+        offset = 0.18 if idx == len(summary) - 1 else 0.30
         ax.text(
-            mean + 0.23,
+            mean + offset,
             y,
             f"{mean:.3f} ± {sd:.3f}",
             va="center",
@@ -157,8 +158,13 @@ def plot_summary(summary: pd.DataFrame) -> None:
     ax.set_yticks(y_positions)
     ax.set_yticklabels(summary["method_label"], fontsize=12)
     ax.set_xlabel("test_mean", fontsize=16)
-    ax.set_title(f"{PROBLEM_GROUP}: test_mean", fontsize=18, pad=14)
-    ax.set_xlim(0.8, 1.8)
+    # ax.set_title(
+    #     f"Comparison of causal conditional constraint methods for {PROBLEM_GROUP}",
+    #     fontsize=18,
+    #     pad=14,
+    #     x=0.35,
+    # )
+    ax.set_xlim(0.4, 1.6)
     ax.grid(True, axis="x", alpha=0.25)
     ax.set_axisbelow(True)
     ax.tick_params(axis="x", labelsize=11)
@@ -173,7 +179,7 @@ def plot_summary(summary: pd.DataFrame) -> None:
 def main() -> None:
     summary = load_summary()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    summary.to_csv(OUTPUT_TABLE, index=False)
+    # summary.to_csv(OUTPUT_TABLE, index=False)
     plot_summary(summary)
     print(f"Saved table: {OUTPUT_TABLE}")
     print(f"Saved plot: {OUTPUT_PLOT}")

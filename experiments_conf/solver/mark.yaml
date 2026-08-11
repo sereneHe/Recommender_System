@@ -9,9 +9,8 @@ n_estimators: 10
 max_depth: 3
 learning_rate: 0.1
 random_state: 42
-
-feature_selector: SequentialFeatureSelector
-
+# feature_selector: SequentialFeatureSelector
+feature_selector: none
 
 # debugging
 debug: false

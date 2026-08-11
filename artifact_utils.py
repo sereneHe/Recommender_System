@@ -8,6 +8,8 @@ import yaml
 
 _ALLOWED_ARTIFACT_NAMES = {
     "config.yaml",
+    "cv_validation_history.yaml",
+    "validation_history.yaml",
 }
 
 

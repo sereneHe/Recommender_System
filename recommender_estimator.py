@@ -7,6 +7,7 @@ from os.path import join
 
 from sklearn.base import BaseEstimator
 from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
@@ -41,8 +42,44 @@ def compute_predictor_errors_and_cs_scikit(estimator, X, y, W):
     g0 = M[:, :-1] @ muX
     v = M[:, -1]
     test_c = np.linalg.norm(g0 + y_pred_norm.mean(axis=0) * v)
-    
+
     return {'score': test_mse, 'c': test_c}
+
+
+def compute_recalculated_w_est(prep_data, target_col, cfg):
+    """Compute a single MILP DAG once for the full problem and reuse it later."""
+    prep_data = prep_data.dropna(subset=[target_col])
+    prep_data = prep_data.dropna(axis=1)
+    configured_features = getattr(cfg, "current_feature_names", None)
+    if configured_features is not None:
+        current_column_names = [str(col) for col in configured_features if str(col) in prep_data.columns]
+    else:
+        current_column_names = [str(col) for col in prep_data.columns if col != target_col]
+    X = prep_data.drop(target_col, axis=1) if target_col in prep_data.columns else prep_data
+    X = X[current_column_names]
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+    y = prep_data[target_col]
+    y_mean = y.mean()
+    y_std = y.std()
+    y_scaled = (y - y_mean) / y_std
+
+    d = X.shape[1] + 1
+    X_y = np.column_stack((X, y_scaled.to_numpy()))
+    G = nx.read_graphml(join(cfg.data_path, cfg.knowledge_graph_filename))
+    H = G.subgraph(current_column_names + [target_col]).copy()
+    H = nx.complement(H)
+    col_to_idx = {col: idx for idx, col in enumerate(current_column_names + [target_col])}
+    tabu_edges = [(col_to_idx[s], col_to_idx[e]) for (s, e) in H.edges()]
+    w_est, _, _, _, _ = solve_milp.solve(
+        X_y,
+        cfg,
+        cfg.nonzero_threshold,
+        Y=[],
+        B_ref=np.zeros((d, d)),
+        tabu_edges=tabu_edges,
+    )
+    return w_est
 
 class RecommenderBaseEstimator(BaseEstimator):
     def __init__(self, w_est, target_col, row_and_col_names, custom_objective, prep_data, cfg):
@@ -115,6 +152,7 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
 
     def fit(self, X, y=None):
         _, X, y = self.preprocess_data(X, y)
+        current_column_names = self.get_current_column_names(X)
         #self._y_train_mean_ = y.mean()
         if self.custom_objective in ['lagrange', 'mse_custom']:
             self.scaler_ = StandardScaler()
@@ -124,34 +162,12 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
             y_scaled = (y - self._y_mean) / self._y_std # ExDBN may not work well, if we do not normalize also y
 
             if self.cfg.recalculate_dag:
-                d = X.shape[1] + 1 # adding one for y
-                X_y = np.column_stack((X, y_scaled.to_numpy()))
-                # if d <= 2:
-                #     w_est = np.zeros((d,d))
-                # else:
-                #print("max X", X.max(), "min X", X.min())
-                current_column_names = self.get_current_column_names(X)
-                G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
-                #g_nodes = list(G.nodes())
-                #print(G.nodes())
-                #print(current_column_names + [self.target_col])
-                H = G.subgraph(current_column_names + [self.target_col]).copy()
-                # if H.number_of_nodes() > 0:
-                #     print('not emty')
-                H = nx.complement(H)
-                col_to_idx = {col: idx for idx, col in enumerate(current_column_names + [self.target_col])}
-                tabu_edges = list((col_to_idx[s],col_to_idx[e]) for (s,e) in H.edges())
-                # if tabu_edges:
-                #     print(tabu_edges)
-                w_est, _, _, _, _ = solve_milp.solve(X_y, self.cfg, self.cfg.nonzero_threshold,
-                                                                        Y=[],
-                                                                        B_ref=np.zeros((d,d)),
-                                                                        tabu_edges=tabu_edges )
+                w_est = compute_recalculated_w_est(self.prep_data, self.target_col, self.cfg)
                 self._w_est = w_est
 
             else:
                 row_and_col_names_indices = {name: i for i, name in enumerate(self.row_and_col_names)}
-                idx_list = [row_and_col_names_indices[f] for f in self.get_current_column_names(X)]
+                idx_list = [row_and_col_names_indices[f] for f in current_column_names]
                 predict_idx = row_and_col_names_indices[self.target_col]
                 w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
                 self._w_est = w_est
@@ -201,44 +217,50 @@ class XGBRecommenderPredictor(RecommenderBaseEstimator):
 class HCRecommenderPredictor(RecommenderBaseEstimator):
     fit_lagrangian_nn_constraint = staticmethod(fit_hc_lagrangian_nn_constraint)
     inject_ci_context = False
+    use_validation_selection = False
 
     def fit(self, X, y=None):
         _, X, y = self.preprocess_data(X, y)
     # self._y_train_mean_ = y.mean()
         current_column_names = self.get_current_column_names(X)
+        X_fit = X
+        y_fit = y
+        X_val = None
+        y_val = None
+        use_validation = self.use_validation_selection and bool(
+            getattr(self.cfg, "use_validation", True)
+        )
+        if use_validation:
+            val_fraction = float(getattr(self.cfg, "validation_fraction", 0.2))
+            if 0.0 < val_fraction < 1.0 and len(y) >= 3:
+                X_fit, X_val, y_fit, y_val = train_test_split(
+                    X,
+                    y,
+                    test_size=val_fraction,
+                    random_state=int(getattr(self.cfg, "validation_random_state", 0)),
+                    shuffle=True,
+                )
+            else:
+                logging.warning(
+                    "Skipping validation split: validation_fraction=%s, n_samples=%s",
+                    val_fraction,
+                    len(y),
+                )
         self.scaler_ = StandardScaler()
-        X = self.scaler_.fit_transform(X)
+        X = self.scaler_.fit_transform(X_fit)
+        X_val_scaled = self.scaler_.transform(X_val) if X_val is not None else None
         if self.inject_ci_context:
             with open_dict(self.cfg):
                 self.cfg.current_feature_names = list(current_column_names)
                 self.cfg.current_target_name = self.target_col
-        self._y_mean = y.mean()
-        self._y_std = y.std()
-        y = (y - self._y_mean) / self._y_std
+        self._y_mean = y_fit.mean()
+        self._y_std = y_fit.std()
+        y = (y_fit - self._y_mean) / self._y_std
+        y_val_scaled = (y_val - self._y_mean) / self._y_std if y_val is not None else None
         self._y_normalized = True
 
         if self.cfg.recalculate_dag:
-            d = X.shape[1] + 1 # adding one for y
-            X_y = np.column_stack((X, y.to_numpy()))
-            # if d <= 2:
-            #     w_est = np.zeros((d,d))
-            # else:
-            # print("max X", X.max(), "min X", X.min())
-            G = nx.read_graphml(join(self.cfg.data_path, self.cfg.knowledge_graph_filename))
-            # print(G.nodes())
-            # print(current_column_names + [self.target_col])
-            H = G.subgraph(current_column_names + [self.target_col]).copy()
-            if H.number_of_nodes() > 0:
-                print('not emty')
-            H = nx.complement(H)
-            col_to_idx = {col: idx for idx, col in enumerate(current_column_names + [self.target_col])}
-            tabu_edges = list((col_to_idx[s],col_to_idx[e]) for (s,e) in H.edges())
-            # if tabu_edges:
-            #     print(tabu_edges)
-            w_est, _, _, _, _ = solve_milp.solve(X_y, self.cfg, self.cfg.nonzero_threshold,
-                                                                    Y=[],
-                                                                    B_ref=np.zeros((d,d)),
-                                                                    tabu_edges=tabu_edges )
+            w_est = compute_recalculated_w_est(self.prep_data, self.target_col, self.cfg)
             self._w_est = w_est
 
         else:
@@ -249,7 +271,15 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             w_est = self.w_est[np.ix_(idx_list + [predict_idx], idx_list + [predict_idx])]
             self._w_est = w_est
 
-        self._rf_model_, lam = self.fit_lagrangian_nn_constraint(X, y, w_est, self.cfg)
+        self._rf_model_, lam = self.fit_lagrangian_nn_constraint(
+            X,
+            y,
+            w_est,
+            self.cfg,
+            X_val=X_val_scaled,
+            y_val=y_val_scaled,
+        )
+        self.validation_history_ = getattr(self._rf_model_, "validation_history_", None)
 
         return self
         
@@ -273,6 +303,7 @@ class HCCIRecommenderPredictor(HCRecommenderPredictor):
 class HCCERecommenderPredictor(HCRecommenderPredictor):
     fit_lagrangian_nn_constraint = staticmethod(fit_ci_ce_lagrangian_nn_constraint)
     inject_ci_context = True
+    use_validation_selection = True
 
 
 class REGRecommenderPredictor(RecommenderBaseEstimator):

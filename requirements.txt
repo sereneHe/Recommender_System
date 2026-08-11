@@ -5,6 +5,8 @@ mlflow
 networkx
 numpy
 pandas
+openpyxl
+odfpy
 matplotlib
 scipy
 scikit-learn

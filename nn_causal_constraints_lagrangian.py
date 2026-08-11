@@ -9,8 +9,10 @@ from hc_predictor_ce import (
     conditional_covariance_mean,
     dependent_expectation_violations,
     dependent_expectation_inequalities,
+    ensure_humancompatible_pbm_compatible,
     independent_expectation_inequalities,
     is_expectation_constraint_mode,
+    hard_discrete_conditional_mutual_information,
     make_expectation_pbm,
     make_ce_minibatch_loader,
     signed_expectation_equalities,
@@ -46,6 +48,104 @@ except ModuleNotFoundError:  # pragma: no cover - keeps local smoke tests import
 
         def update(self, g):
             del g
+
+
+class StochasticConstrainedOptimizerState:
+    """Optional SPBM-style state around the existing ALM/PBM backends."""
+
+    def __init__(self, model, cfg):
+        self.enabled = bool(getattr(cfg, "use_stochastic_constrained_optimizer", False))
+        self.prox_mu = float(getattr(cfg, "sco_prox_mu", 0.0)) if self.enabled else 0.0
+        self.prox_center_decay = float(getattr(cfg, "sco_prox_center_decay", 0.95))
+        self.dual_ema_gamma = float(getattr(cfg, "sco_dual_ema_gamma", 0.0))
+        self.use_adaptive_penalty = bool(getattr(cfg, "sco_use_adaptive_penalty", False))
+        self.penalty_violation_tol = float(getattr(cfg, "sco_penalty_violation_tol", 0.0))
+        self.alm_penalty_mult = float(getattr(cfg, "sco_alm_penalty_mult", 1.05))
+        self.pbm_penalty_mult = float(getattr(cfg, "sco_pbm_penalty_mult", 0.95))
+        self.alm_penalty_range = tuple(getattr(cfg, "sco_alm_penalty_range", (1e-6, 1e6)))
+        self.pbm_penalty_range = tuple(getattr(cfg, "sco_pbm_penalty_range", (1e-6, 1e6)))
+        self.prox_centers = [
+            param.detach().clone()
+            for param in model.parameters()
+            if param.requires_grad
+        ]
+
+    def apply_prox_gradient(self, model):
+        if not self.enabled or self.prox_mu <= 0.0:
+            return
+        with torch.no_grad():
+            center_idx = 0
+            for param in model.parameters():
+                if not param.requires_grad:
+                    continue
+                if param.grad is not None:
+                    param.grad.add_(param.detach() - self.prox_centers[center_idx], alpha=self.prox_mu)
+                center_idx += 1
+
+    def update_prox_center(self, model):
+        if not self.enabled or self.prox_mu <= 0.0:
+            return
+        decay = self.prox_center_decay
+        with torch.no_grad():
+            center_idx = 0
+            for param in model.parameters():
+                if not param.requires_grad:
+                    continue
+                self.prox_centers[center_idx].mul_(decay).add_(param.detach(), alpha=1.0 - decay)
+                center_idx += 1
+
+    def capture_duals(self, dual_opt):
+        if not self.enabled or not hasattr(dual_opt, "duals"):
+            return None
+        return dual_opt.duals.detach().clone()
+
+    def smooth_duals(self, dual_opt, previous_duals):
+        if (
+            not self.enabled
+            or previous_duals is None
+            or self.dual_ema_gamma <= 0.0
+            or self.dual_ema_gamma >= 1.0
+            or not hasattr(dual_opt, "duals")
+        ):
+            return
+        with torch.no_grad():
+            dual_opt.duals.copy_(
+                self.dual_ema_gamma * previous_duals
+                + (1.0 - self.dual_ema_gamma) * dual_opt.duals
+            )
+
+    def update_alm_penalty(self, dual_opt, constraints):
+        if not self.enabled or not self.use_adaptive_penalty or constraints is None:
+            return
+        if not hasattr(dual_opt, "penalty") or constraints.numel() == 0:
+            return
+        violation = torch.max(torch.abs(constraints.detach())).item()
+        if violation <= self.penalty_violation_tol:
+            return
+        low, high = self.alm_penalty_range
+        dual_opt.penalty = float(np.clip(float(dual_opt.penalty) * self.alm_penalty_mult, low, high))
+
+    def update_pbm_penalties(self, dual_opt, constraints):
+        if not self.enabled or not self.use_adaptive_penalty or constraints is None:
+            return
+        if not hasattr(dual_opt, "penalties") or constraints.numel() == 0:
+            return
+        violation = torch.max(torch.relu(constraints.detach())).item()
+        if violation <= self.penalty_violation_tol:
+            return
+        low, high = self.pbm_penalty_range
+        with torch.no_grad():
+            dual_opt.penalties.mul_(self.pbm_penalty_mult).clamp_(min=low, max=high)
+
+    def forward_update_pbm(self, dual_opt, loss, constraints):
+        if getattr(dual_opt, "is_local_stochastic_pbm", False):
+            return dual_opt.forward_update(loss, constraints)
+        ensure_humancompatible_pbm_compatible(dual_opt)
+        previous_duals = self.capture_duals(dual_opt)
+        updated_loss = dual_opt.forward_update(loss, constraints)
+        self.smooth_duals(dual_opt, previous_duals)
+        self.update_pbm_penalties(dual_opt, constraints)
+        return updated_loss
 
 # def compute_predictor_errors(preds, y, y_train_mean):
 #     mse = np.mean((preds - y) ** 2)
@@ -85,7 +185,31 @@ class MLPRegressor(nn.Module):
 # ------------------------------------------------------------
 
 def fit_aug_lagrangian_nn_constraint(
-    X, y, W, cfg, verbose=False, device="cpu", 
+    X, y, W, cfg, verbose=False, device="cpu", X_val=None, y_val=None,
+):
+    torch_num_threads = int(getattr(cfg, "torch_num_threads", 1))
+    previous_num_threads = torch.get_num_threads()
+    should_limit_threads = device == "cpu" and torch_num_threads > 0
+    if should_limit_threads and previous_num_threads != torch_num_threads:
+        torch.set_num_threads(torch_num_threads)
+    try:
+        return _fit_aug_lagrangian_nn_constraint_impl(
+            X,
+            y,
+            W,
+            cfg,
+            verbose=verbose,
+            device=device,
+            X_val=X_val,
+            y_val=y_val,
+        )
+    finally:
+        if should_limit_threads and torch.get_num_threads() != previous_num_threads:
+            torch.set_num_threads(previous_num_threads)
+
+
+def _fit_aug_lagrangian_nn_constraint_impl(
+    X, y, W, cfg, verbose=False, device="cpu", X_val=None, y_val=None,
 ):
     torch.set_default_dtype(torch.float32)
 
@@ -93,6 +217,12 @@ def fit_aug_lagrangian_nn_constraint(
     X = torch.tensor(np.asarray(X), dtype=torch.float32, device=device)
     y = torch.tensor(np.asarray(y), dtype=torch.float32, device=device)
     W = torch.tensor(np.asarray(W), dtype=torch.float32, device=device)
+    if X_val is not None and y_val is not None:
+        X_val = torch.tensor(np.asarray(X_val), dtype=torch.float32, device=device)
+        y_val = torch.tensor(np.asarray(y_val), dtype=torch.float32, device=device)
+    else:
+        X_val = None
+        y_val = None
 
     n, d = X.shape
     assert W.shape == (d + 1, d + 1), "W must be (d+1)x(d+1)"
@@ -144,6 +274,7 @@ def fit_aug_lagrangian_nn_constraint(
         momentum=float(getattr(cfg, "alm_momentum", 0.0)),
     )
     ce_pbm_dual_opt = make_expectation_pbm(cfg, n_ce_pbm_constraints, device)
+    stochastic_opt = StochasticConstrainedOptimizerState(model, cfg)
     if use_expectation_constraints:
         logging.info(
             "Conditional expectation constraints: backend=%s, ALM=%d, PBM=%d, independent=%d, dependent=%d",
@@ -172,6 +303,14 @@ def fit_aug_lagrangian_nn_constraint(
         log_active_ci_constraints(cfg, W, X, y, stage="Initial")
 
     loss = MSELoss()
+    best_val_loss = float("inf")
+    best_state_dict = None
+    best_outer = None
+    no_improvement = 0
+    validation_history = []
+    validation_min_delta = float(getattr(cfg, "validation_min_delta", 0.0))
+    early_stopping_patience = int(getattr(cfg, "early_stopping_patience", 0) or 0)
+    restore_best_validation_model = bool(getattr(cfg, "restore_best_validation_model", True))
     has_ce_constraints = bool(ce_independent_constraints or ce_dependent_constraints)
     if use_expectation_constraints and bool(getattr(cfg, "ce_use_balanced_batches", False)):
         if has_ce_constraints:
@@ -186,6 +325,7 @@ def fit_aug_lagrangian_nn_constraint(
     ce_loader_iter = iter(ce_loader) if ce_loader is not None else None
 
     for outer in range(cfg.n_outer):
+        g = torch.empty(0, device=device)
         for _ in range(cfg.n_inner):
             if ce_loader_iter is None:
                 X_batch = X
@@ -214,6 +354,7 @@ def fit_aug_lagrangian_nn_constraint(
                         X_batch,
                         yhat,
                         ce_independent_constraints,
+                        cfg=cfg,
                     )
                     g_parts.append(ce_eq)
                 if ce_backend == "alm_all" and ce_dependent_constraints:
@@ -221,6 +362,7 @@ def fit_aug_lagrangian_nn_constraint(
                         X_batch,
                         yhat,
                         ce_dependent_constraints,
+                        cfg=cfg,
                     )
                     g_parts.append(ce_dep_eq)
                 g = torch.cat(g_parts) if g_parts else torch.empty(0, device=device, dtype=yhat.dtype)
@@ -234,6 +376,7 @@ def fit_aug_lagrangian_nn_constraint(
                                 yhat,
                                 ce_independent_constraints,
                                 tolerance=float(getattr(cfg, "ce_independence_tolerance", 0.0)),
+                                cfg=cfg,
                             )
                         )
                     if ce_backend in {"alm_pbm", "pbm_all"} and ce_dependent_constraints:
@@ -242,10 +385,12 @@ def fit_aug_lagrangian_nn_constraint(
                                 X_batch,
                                 yhat,
                                 ce_dependent_constraints,
+                                cfg=cfg,
                             )
                         )
                     if ce_ineq_parts:
-                        aug_loss = ce_pbm_dual_opt.forward_update(
+                        aug_loss = stochastic_opt.forward_update_pbm(
+                            ce_pbm_dual_opt,
                             aug_loss,
                             torch.cat(ce_ineq_parts),
                         )
@@ -260,6 +405,7 @@ def fit_aug_lagrangian_nn_constraint(
                                 yhat,
                                 ce_independent_constraints,
                                 tolerance=float(getattr(cfg, "ce_independence_tolerance", 0.0)),
+                                cfg=cfg,
                             )
                         )
                     if ce_backend in {"alm_pbm", "pbm_all"} and ce_dependent_constraints:
@@ -268,22 +414,63 @@ def fit_aug_lagrangian_nn_constraint(
                                 X_batch,
                                 yhat,
                                 ce_dependent_constraints,
+                                cfg=cfg,
                             )
                         )
                     if ce_ineq_parts:
-                        mse = ce_pbm_dual_opt.forward_update(mse, torch.cat(ce_ineq_parts))
+                        mse = stochastic_opt.forward_update_pbm(
+                            ce_pbm_dual_opt,
+                            mse,
+                            torch.cat(ce_ineq_parts),
+                        )
                 mse.backward()
+            stochastic_opt.apply_prox_gradient(model)
             optimizer.step()
+            stochastic_opt.update_prox_center(model)
 
         if cfg.constrained and len(dual_opt.duals) > 0:
             with torch.no_grad():
+                previous_duals = stochastic_opt.capture_duals(dual_opt)
                 dual_opt.update(g)
+                stochastic_opt.smooth_duals(dual_opt, previous_duals)
+                stochastic_opt.update_alm_penalty(dual_opt, g)
             lam = dual_opt.duals.detach().numpy()
 
         for param_group in optimizer.param_groups:
             param_group['lr'] *= cfg.lr_decay
 
         lam = dual_opt.duals.detach().numpy()
+        if X_val is not None and y_val is not None:
+            model.eval()
+            with torch.no_grad():
+                train_eval_loss = loss(model(X), y).item()
+                val_loss = loss(model(X_val), y_val).item()
+            model.train()
+            validation_history.append(
+                {
+                    "outer": outer,
+                    "train_loss": train_eval_loss,
+                    "val_loss": val_loss,
+                }
+            )
+            if val_loss < best_val_loss - validation_min_delta:
+                best_val_loss = val_loss
+                best_outer = outer
+                best_state_dict = {
+                    key: value.detach().clone()
+                    for key, value in model.state_dict().items()
+                }
+                no_improvement = 0
+            else:
+                no_improvement += 1
+            if early_stopping_patience > 0 and no_improvement >= early_stopping_patience:
+                logging.info(
+                    "Early stopping at outer=%d; best outer=%s, best val_loss=%.6g",
+                    outer,
+                    best_outer,
+                    best_val_loss,
+                )
+                break
         if verbose:
             print(
                 f"outer={outer:02d}  "
@@ -292,6 +479,24 @@ def fit_aug_lagrangian_nn_constraint(
                 f"||g||={np.linalg.norm(g).item():.6e}  "
                 f"lambda_norm={np.linalg.norm(lam).item():.6e}"
             )
+
+    if best_state_dict is not None and restore_best_validation_model:
+        model.load_state_dict(best_state_dict)
+        logging.info(
+            "Loaded best validation model from outer=%s with val_loss=%.6g",
+            best_outer,
+            best_val_loss,
+        )
+    elif best_state_dict is not None:
+        logging.info(
+            "Keeping final outer-loop model; best validation checkpoint was outer=%s with val_loss=%.6g",
+            best_outer,
+            best_val_loss,
+        )
+    model.validation_history_ = validation_history
+    model.best_validation_loss_ = best_val_loss if best_state_dict is not None else None
+    model.best_validation_outer_ = best_outer
+    model.restore_best_validation_model_ = restore_best_validation_model
 
     if bool(getattr(cfg, "ci_log_constraints", True)):
         with torch.no_grad():
@@ -392,6 +597,9 @@ def _build_ci_constraints_from_cfg(cfg, W):
                     add_shielded_collider_dependence=bool(
                         getattr(cfg, "ci_add_shielded_collider_dependence", False)
                     ),
+                    add_collider_marginal_independence=bool(
+                        getattr(cfg, "ci_add_collider_marginal_independence", False)
+                    ),
                     shielded_dependent_margin=shielded_dependent_margin,
                     max_shielded_constraints_per_collider=max_shielded_constraints_per_collider,
                     max_shielded_constraints_per_target=max_shielded_constraints_per_target,
@@ -432,6 +640,9 @@ def _build_ci_constraints_from_cfg(cfg, W):
             add_shielded_collider_dependence=bool(
                 getattr(cfg, "ci_add_shielded_collider_dependence", False)
             ),
+            add_collider_marginal_independence=bool(
+                getattr(cfg, "ci_add_collider_marginal_independence", False)
+            ),
             shielded_dependent_margin=shielded_dependent_margin,
             max_shielded_constraints_per_collider=max_shielded_constraints_per_collider,
             max_shielded_constraints_per_target=max_shielded_constraints_per_target,
@@ -455,7 +666,16 @@ def _build_ci_constraints_from_cfg(cfg, W):
     )
 
 
-def _ci_constraint_penalty_values(X, y, ci_constraints, penalty_kind, eps=1e-8):
+def _is_discrete_ci_kind(penalty_kind):
+    return penalty_kind in {
+        "discrete_conditional_independence",
+        "strict_discrete_ci",
+        "discrete_ci",
+        "quantile_discrete_ci",
+    }
+
+
+def _ci_constraint_penalty_values(X, y, ci_constraints, penalty_kind, eps=1e-8, cfg=None):
     if not ci_constraints:
         return []
 
@@ -483,6 +703,21 @@ def _ci_constraint_penalty_values(X, y, ci_constraints, penalty_kind, eps=1e-8):
                 value = margin - cond_cov_mean
             else:
                 raise ValueError(f"Unknown CI constraint type: {relation!r}.")
+        elif _is_discrete_ci_kind(penalty_kind):
+            cmi = hard_discrete_conditional_mutual_information(
+                x_var,
+                y_var,
+                z_var,
+                n_bins=int(getattr(cfg, "ci_discrete_n_bins", getattr(cfg, "ce_sensitive_bins", 4))),
+                max_z_states=int(getattr(cfg, "ci_discrete_max_z_states", 256)),
+                eps=eps,
+            ).to(device=X.device, dtype=X.dtype)
+            if relation == "independent":
+                value = cmi
+            elif relation == "dependent":
+                value = margin - cmi
+            else:
+                raise ValueError(f"Unknown CI constraint type: {relation!r}.")
         elif penalty_kind in {"conditional_correlation", "correlation", "legacy"}:
             corr = conditional_correlation_value(x_var, y_var, z_var, eps=eps)
             if relation == "independent":
@@ -494,7 +729,7 @@ def _ci_constraint_penalty_values(X, y, ci_constraints, penalty_kind, eps=1e-8):
         else:
             raise ValueError(
                 f"Unknown ci_penalty_kind: {penalty_kind!r}. "
-                "Expected one of {'conditional_expectation', 'conditional_correlation'}."
+                "Expected one of {'conditional_expectation', 'discrete_conditional_independence', 'conditional_correlation'}."
             )
 
         values.append(float(value.detach().cpu()))
@@ -557,7 +792,14 @@ def log_active_ci_constraints(cfg, W, X, y, stage):
         return
 
     with torch.no_grad():
-        values = _ci_constraint_penalty_values(X, y, ci_constraints, penalty_kind, eps=eps)
+        values = _ci_constraint_penalty_values(
+            X,
+            y,
+            ci_constraints,
+            penalty_kind,
+            eps=eps,
+            cfg=cfg,
+        )
 
     for idx, (spec, value) in enumerate(zip(ci_constraints, values), start=1):
         x_name = names[spec["x_index"]]
@@ -929,6 +1171,7 @@ def conservative_ci_constraints_from_adjacency(
     dependent_margin=0.05,
     add_dsep_independence=True,
     add_shielded_collider_dependence=False,
+    add_collider_marginal_independence=False,
     shielded_dependent_margin=0.05,
     max_shielded_constraints_per_collider=0,
     max_shielded_constraints_per_target=0,
@@ -970,6 +1213,10 @@ def conservative_ci_constraints_from_adjacency(
         skip_if_direct_edge=skip_if_direct_edge,
         dependent_margin=dependent_margin,
     )
+    if add_collider_marginal_independence:
+        constraints.extend(
+            [c for c in collider_pairs if c.get("mode") == "marginal_independent"]
+        )
     constraints.extend(
         [c for c in collider_pairs if c.get("mode") == "conditional_dependent"]
     )

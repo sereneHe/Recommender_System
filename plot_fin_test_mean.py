@@ -12,7 +12,7 @@ import pandas as pd
 ROOT = Path("/Users/xiaoyuhe/Recommender_Pavel")
 PROBLEM_GROUP = os.environ.get("PROBLEM_GROUPS", "FRED_16country_monthly").split(",")[0].strip()
 REPORT_FAMILY = PROBLEM_GROUP.split("_", 1)[0]
-BASE_DIR = ROOT / "reports" / REPORT_FAMILY
+BASE_DIR = ROOT / "reports" / REPORT_FAMILY / PROBLEM_GROUP
 
 PROBLEM = os.environ.get("PROBLEM", f"{PROBLEM_GROUP}/industry_eu_fin").split(",")[0].strip()
 TARGET = os.environ.get("TARGET", PROBLEM.rsplit("_", 1)[-1].upper())

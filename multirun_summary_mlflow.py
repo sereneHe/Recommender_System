@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from datetime import datetime
 from pathlib import Path
 import re
 
@@ -19,6 +20,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reports-dir", default="reports", help="Directory where summary tables will be written.")
     parser.add_argument("--experiment", default="recommender_industry", help="MLflow experiment name.")
     parser.add_argument("--solver", default=None, help="Optional solver name filter, for example hc_predictor or mark.")
+    parser.add_argument("--setting", default=None, help="Optional solver setting suffix inferred from YAML.")
+    parser.add_argument(
+        "--split-settings",
+        action="store_true",
+        help="Write one CSV per inferred solver setting suffix from local multirun YAML configs.",
+    )
     parser.add_argument("--output-name", default=None, help="Optional output CSV basename without extension.")
     parser.add_argument(
         "--source",
@@ -31,7 +38,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parent
 
 
 def load_group_configs(group_dir: Path) -> tuple[str, str, list[tuple[str, str]]]:
@@ -58,6 +65,8 @@ _RUN_RESULT_RE = re.compile(
     r"runtime=(?P<runtime>[0-9.eE+-]+)s, "
     r"wall_runtime=(?P<wall_runtime>[0-9.eE+-]+)s"
 )
+
+_LOG_TIME_RE = re.compile(r"\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})\]")
 
 
 def _as_float(value: str | None) -> float | None:
@@ -92,6 +101,70 @@ def _parse_result_summary(log_path: Path) -> dict[str, object] | None:
         "test_err": _as_float(match.group("test_error")),
         "runtime": _as_float(match.group("runtime")),
         "wall_runtime": _as_float(match.group("wall_runtime")),
+    }
+
+
+def _mean(values: list[object] | None) -> float | None:
+    if not values:
+        return None
+    try:
+        numeric_values = [float(value) for value in values]
+    except (TypeError, ValueError):
+        return None
+    return sum(numeric_values) / len(numeric_values)
+
+
+def _log_duration_seconds(log_path: Path) -> float | None:
+    start = None
+    end = None
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "Starting experiment" in line and start is None:
+            match = _LOG_TIME_RE.search(line)
+            if match:
+                start = datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S,%f")
+        if "Experiment Finished" in line:
+            match = _LOG_TIME_RE.search(line)
+            if match:
+                end = datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S,%f")
+    if start is None or end is None:
+        return None
+    return (end - start).total_seconds()
+
+
+def _read_mlflow_artifact_summary(run_dir: Path, log_path: Path) -> dict[str, object] | None:
+    root = repo_root()
+    mlruns_dir = root / "mlruns"
+    run_root = None
+    for work_path in mlruns_dir.glob("*/*/artifacts/work_dir.txt"):
+        try:
+            work_dir = Path(work_path.read_text(encoding="utf-8").strip())
+        except OSError:
+            continue
+        if work_dir == run_dir:
+            run_root = work_path.parent.parent
+            break
+    if run_root is None:
+        return None
+
+    cv_path = run_root / "artifacts" / "cv_errors.yaml"
+    if not cv_path.exists():
+        return None
+    cv_errors = yaml.safe_load(cv_path.read_text(encoding="utf-8")) or {}
+    train_error = _mean(cv_errors.get("train_errs"))
+    test_err = _mean(cv_errors.get("test_errs"))
+    if train_error is None or test_err is None:
+        return None
+
+    selected_path = run_root / "artifacts" / "selected_features.txt"
+    selected_features = ""
+    if selected_path.exists():
+        selected_features = selected_path.read_text(encoding="utf-8").strip().replace("[", "").replace("]", "")
+
+    return {
+        "train_error": train_error,
+        "test_err": test_err,
+        "selected features": selected_features,
+        "runtime": _log_duration_seconds(log_path),
     }
 
 
@@ -132,12 +205,44 @@ def _multirun_sort_key(run_dir: Path) -> tuple[str, str, int]:
     return (run_dir.parent.parent.name, run_dir.parent.name, run_num)
 
 
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _solver_setting_suffix(solver: dict[str, object]) -> str:
+    solver_name = str(solver.get("name") or "")
+    if solver_name != "hc_predictor_ce":
+        return solver_name
+
+    ci_threshold = _as_float(str(solver.get("ci_threshold", "")))
+    nonzero_threshold = _as_float(str(solver.get("nonzero_threshold", "")))
+    lambda1 = _as_float(str(solver.get("lambda1", "")))
+    lambda2 = _as_float(str(solver.get("lambda2", "")))
+    shielded = _as_bool(solver.get("ci_add_shielded_collider_dependence", False))
+    limits = _as_bool(solver.get("ci_use_shielded_collider_limits", False))
+
+    if shielded and limits:
+        return "hc_predictor_ce_shielded_collider_limit"
+    if shielded:
+        return "hc_predictor_ce_shielded_collider"
+    if ci_threshold == 0.05 and nonzero_threshold == 0.05:
+        return "hc_predictor_ce_ceThreshold_0.05"
+    if lambda1 == 0.05 and lambda2 == 0.05:
+        return "hc_predictor_ce_milpLambda_0.05"
+    return "hc_predictor_ce"
+
+
 def latest_multirun_runs_for_group(
     multirun_dir: Path,
     data_path: str,
     frequency: str,
     targets: list[str],
     solver_name: str | None = None,
+    setting_name: str | None = None,
 ) -> pd.DataFrame:
     target_set = set(targets)
     found_rows = []
@@ -162,6 +267,9 @@ def latest_multirun_runs_for_group(
             continue
         if solver_name is not None and solver.get("name") != solver_name:
             continue
+        setting = _solver_setting_suffix(solver)
+        if setting_name is not None and setting != setting_name:
+            continue
         if target not in target_set or target in seen_targets:
             continue
 
@@ -170,6 +278,7 @@ def latest_multirun_runs_for_group(
             continue
 
         summary = _parse_result_summary(log_path) or {}
+        mlflow_summary = {}
         train_error = summary.get("train_error")
         test_err = summary.get("test_err")
         if train_error is None:
@@ -177,23 +286,32 @@ def latest_multirun_runs_for_group(
         if test_err is None:
             test_err = _read_legacy_text_metric(run_dir, "test_err.txt")
         if train_error is None or test_err is None:
+            mlflow_summary = _read_mlflow_artifact_summary(run_dir, log_path) or {}
+            train_error = mlflow_summary.get("train_error")
+            test_err = mlflow_summary.get("test_err")
+        if train_error is None or test_err is None:
             continue
 
         selected_features = str(summary.get("selected features") or _read_legacy_selected_features(run_dir))
+        if not selected_features:
+            selected_features = str((mlflow_summary or {}).get("selected features", ""))
         runtime = summary.get("runtime")
         if runtime is None:
             runtime = _read_legacy_text_metric(run_dir, "runtime.txt")
+        if runtime is None:
+            runtime = (mlflow_summary or {}).get("runtime")
 
         seen_targets.add(target)
         found_rows.append(
             {
                 "target": target,
-                "run_id": str(run_dir),
+                "run_id": str(run_dir.relative_to(repo_root())),
                 "start_time": _run_start_time(run_dir),
                 "train_error": train_error,
                 "test_err": test_err,
                 "selected features": selected_features,
                 "runtime": runtime,
+                "setting": setting,
             }
         )
         if seen_targets == target_set:
@@ -203,6 +321,31 @@ def latest_multirun_runs_for_group(
     if result.empty:
         raise ValueError(f"No matching multirun target runs found for {data_path}")
     return result
+
+
+def discover_multirun_settings_for_group(
+    multirun_dir: Path,
+    data_path: str,
+    frequency: str,
+    solver_name: str | None = None,
+) -> list[str]:
+    settings = set()
+    for cfg_path in multirun_dir.glob("*/*/*/config.yaml"):
+        run_dir = cfg_path.parent
+        log_path = run_dir / "run_experiments.log"
+        if not log_path.exists():
+            continue
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        problem = cfg.get("problem", {})
+        solver = cfg.get("solver", {})
+        if problem.get("data_path") != data_path or problem.get("frequency") != frequency:
+            continue
+        if solver_name is not None and solver.get("name") != solver_name:
+            continue
+        if "Experiment Finished" not in log_path.read_text(encoding="utf-8", errors="replace"):
+            continue
+        settings.add(_solver_setting_suffix(solver))
+    return sorted(settings)
 
 
 def latest_runs_for_group(
@@ -303,6 +446,58 @@ def main() -> None:
     stems_by_target = {target: stem for stem, target in configs}
     targets = [target for _, target in configs]
 
+    def write_runs(runs: pd.DataFrame, output_name: str) -> Path:
+        runs = runs.copy()
+        runs["problem_file"] = runs["target"].map(stems_by_target)
+        runs["train_mean"] = runs["train_error"]
+        runs["test_mean"] = runs["test_err"]
+        parsed_start_time = pd.to_datetime(runs["start_time"], utc=True, errors="coerce")
+        formatted_start_time = parsed_start_time.dt.strftime("%Y-%m-%dT%H:%M:%S.%f%z")
+        formatted_start_time = formatted_start_time.str.replace(r"(\+|-)(\d{2})(\d{2})$", r"\1\2:\3", regex=True)
+        runs["start_time"] = formatted_start_time.where(parsed_start_time.notna(), runs["start_time"].astype(str))
+        runs = runs[
+            [
+                "problem_file",
+                "target",
+                "selected features",
+                "train_mean",
+                "test_mean",
+                "run_id",
+                "start_time",
+                "runtime",
+            ]
+        ]
+        runs = runs.sort_values("problem_file").reset_index(drop=True)
+        csv_path = reports_dir / f"{output_name}.csv"
+        runs.to_csv(csv_path, index=False)
+        return csv_path
+
+    if args.split_settings:
+        if args.source not in {"auto", "multirun"}:
+            raise ValueError("--split-settings is supported for local multirun summaries.")
+        settings = discover_multirun_settings_for_group(
+            root / args.multirun_dir,
+            data_path,
+            frequency,
+            solver_name=args.solver,
+        )
+        if args.setting is not None:
+            settings = [setting for setting in settings if setting == args.setting]
+        if not settings:
+            raise ValueError("No matching solver settings found in multirun configs.")
+        for setting in settings:
+            runs = latest_multirun_runs_for_group(
+                root / args.multirun_dir,
+                data_path,
+                frequency,
+                targets,
+                solver_name=args.solver,
+                setting_name=setting,
+            )
+            csv_path = write_runs(runs, f"{args.group}_{setting}")
+            print(csv_path)
+        return
+
     if args.source in {"auto", "multirun"}:
         try:
             runs = latest_multirun_runs_for_group(
@@ -311,6 +506,7 @@ def main() -> None:
                 frequency,
                 targets,
                 solver_name=args.solver,
+                setting_name=args.setting,
             )
         except ValueError:
             if args.source == "multirun":
@@ -330,30 +526,8 @@ def main() -> None:
         )
         runs["runtime"] = runs["run_id"].map(lambda run_id: client.get_run(run_id).data.metrics.get("runtime"))
 
-    runs["problem_file"] = runs["target"].map(stems_by_target)
-    runs["train_mean"] = runs["train_error"]
-    runs["test_mean"] = runs["test_err"]
-    parsed_start_time = pd.to_datetime(runs["start_time"], utc=True, errors="coerce")
-    formatted_start_time = parsed_start_time.dt.strftime("%Y-%m-%dT%H:%M:%S.%f%z")
-    formatted_start_time = formatted_start_time.str.replace(r"(\+|-)(\d{2})(\d{2})$", r"\1\2:\3", regex=True)
-    runs["start_time"] = formatted_start_time.where(parsed_start_time.notna(), runs["start_time"].astype(str))
-    runs = runs[
-        [
-            "problem_file",
-            "target",
-            "selected features",
-            "train_mean",
-            "test_mean",
-            "run_id",
-            "start_time",
-            "runtime",
-        ]
-    ]
-    runs = runs.sort_values("problem_file").reset_index(drop=True)
-
     output_name = args.output_name or args.group
-    csv_path = reports_dir / f"{output_name}.csv"
-    runs.to_csv(csv_path, index=False)
+    csv_path = write_runs(runs, output_name)
     print(csv_path)
 
 

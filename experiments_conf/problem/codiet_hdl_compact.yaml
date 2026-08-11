@@ -1,0 +1,30 @@
+name: codiet
+target: 'HDL (mg/dL)'
+
+features:
+  # Confounders
+  - age
+  - gender_numeric
+  - site_continental
+
+  # Blood cholesterol / lipid markers
+  - CHOL (mg/dL)
+  - LDL (mg/dL)
+  - TRIG (mg/dL)
+
+  # Key metabolome / lipidomics
+  - dbs_rbc_lip_d-dha-22-6n3
+  - dbs_rbc_lip_d-epa-dha
+  - dbs_rbc_lip_d-linoleic-18-2n6
+  - dbs_rbc_lip_d-omega-6
+  - ms_lip_lpe-18:2
+  - ms_lip_pe-o-20:2-22:6
+  - ms_serum_histidine
+  - nmr_urine_myo-inositol
+
+  # Key gut microbiome
+  - microb_4cl_label_1
+  - microb_4cl_label_2
+  - microb_clean15_trnk_k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Prevotellaceae|g__Prevotella
+  - microb_clean15_trnk_k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Roseburia
+  - microb_large_emb_coord_14
