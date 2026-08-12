@@ -1,3 +1,0 @@
-loguru>=0.7.3
-streamlit>=1.53.0
-types-requests

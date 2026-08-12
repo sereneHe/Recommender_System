@@ -1,22 +1,17 @@
-[build-system]
-requires = ["uv_build>=0.9.22,<0.10.0"]
-build-backend = "uv_build"
-
 [project]
-name = "hei_project"
+name = "project_hei"
 version = "0.1.0"
-description = "HEI-based multimodal recommender with Hydra + MLflow"
+description = "Healthy Eating Index (HEI) 多模态健康数据分析"
 authors = [
-  { name = "xiaoyuhe", email = "hexiaoyu@gfel.cvut.cz" },
-]
-
-keywords = ["codiet", "nutrition", "causality", "machine learning", "MLOps"]
-classifiers = [
-  "Development Status :: 3 - Alpha",
-  "Programming Language :: Python :: 3",
+    { name = "xiaoyuhe", email = "serene0410@gmail.com" }
 ]
 readme = "README.md"
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.12"
+keywords = ["machine learning", "MLOps"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+]
 dependencies = [
     "dvc[gs]>=3.66.1",
     "fastapi==0.115.6",
@@ -37,62 +32,14 @@ dependencies = [
     "wandb>=0.23.1",
     "invoke==2.2.0",
     "prometheus-client>=0.24.1",
-    "xgboost==2.0.3",
+    "xgboost",
+    "pyyaml"
 ]
 
-[dependency-groups]
+[tool.uv]
+# uv-specific settings (optional)
+
+[project.optional-dependencies]
 dev = [
-    "coverage==7.6.9",
-    "mkdocs-material==9.4.6",
-    "mkdocs==1.6.1",
-    "pre-commit==4.1.0",
-    "pytest==8.3.4",
-    "ruff==0.1.3",
-    "mkdocstrings-python==1.12.2",
-    "snakeviz>=2.2.0",
-    "mypy>=1.19.1",
-    "pandas-stubs>=2.3.3.260113",
-    "types-requests>=2.32.4.20260107",
-    "httpx>=0.28.1",
-    "pytest-asyncio>=1.3.0",
+    "uv"
 ]
-
-
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu" },
-]
-torchvision = [
-    { index = "pytorch-cpu" },
-]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.ruff]
-line-length = 120
-
-[tool.coverage.run]
-omit = ["tests/*"]
-
-[tool.mypy]
-# This tells mypy to be strict where possible
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-
-# This is the fix for sklearn and other libraries without stubs
-[[tool.mypy.overrides]]
-module = [
-    "sklearn.*",
-    "loguru.*",
-    "hydra.*",
-    "omegaconf.*"
-]
-ignore_missing_imports = true
-
-[project.scripts]
-api = "hei_project.api:main"
-train = "hei_project.train:train"

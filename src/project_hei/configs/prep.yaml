@@ -1,0 +1,24 @@
+# configs/prep.yaml
+prep:
+  use_pca: true
+  pca_print: false
+
+  pca_blocks:
+    - name: ms_serum
+      n_dims: 10
+    - name: ms_urine
+      n_dims: 10
+    - name: nmr_urine
+      n_dims: 15
+
+  use_lipidomics: true
+  use_single_microbiome_alpha: false
+
+  continental_sites: ["AUTH", "BILBAO", "UVEG"]
+
+  non_food_prefixes:
+    - microbiome
+    - scafs
+    - ms_serum.pca
+    - ms_urine.pca
+    - nmr_urine.pca

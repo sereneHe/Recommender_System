@@ -1,307 +1,115 @@
-# Machine Learning Operations in Breast Cancer Aspirate Malignancy Classification
+# Recommender_System — HEI / Multimodal Health Modeling
 
-## Quick Docs
+This repository contains code and configuration for **Healthy Eating Index (HEI)** analysis and **multimodal health-data modeling**.
 
-- App users (non-coding): `README_APP.md`
-- Developers (open-source/code): `README_DEV.md`
+- Main experiment entrypoint: `src/project_hei/run_experiment.py`
+- Hydra configs: `src/project_hei/configs/`
+- Raw data (not committed): `data/raw/`
 
-This is the project of group 5 in the course "Machine Learning Operations" at DTU.
+## Data Sources (Raw)
 
-# Project Description
+The project uses multiple raw modalities. The table below summarizes where they come from (folder/file hints) and the typical variables they contain.
 
-### Overall goal of the project
+| Modality | 📁 Data Sources / File Hints | 🔑 Key Dimensions (Typical Variables) |
+| --- | --- | --- |
+| **🍽️ Food / Diet** | `food_data/` (e.g. *Diet data … Intake 24.xlsx*); `Ashley_code_data/` (Intake24 tidied outputs) | Daily / per-meal intake, food groups, macro- & micronutrients, potential inputs for HEI or other diet quality scores |
+| **🏃 Physical Activity** | `activity/activity.csv` | Activity duration, intensity, type/category, frequency (field definitions based on table schema) |
+| **🔥 Energy Expenditure** | `energy_expenditure/*.csv`; `PAL&TEE Calculation.docx`; `Activity_Summarize Data_All.xlsx` | Physical Activity Level (PAL), Total Energy Expenditure (TEE), site-level or activity-level energy expenditure summaries |
+| **⚖️ Body Composition** | `body_composition/*.xlsx`; `body_composition/biosensors.csv` | Body weight, body fat–related measures, and other biosensor-derived physiological indicators |
+| **🩸 Blood Biochemistry / Blood Pressure / Biomarkers** | `blood_biochemistry/bloodbiochemistry.xlsx`; `UpdatedDataFromSara/Blood pressure*.xlsx`; `UpdatedDataFromSara/biochemical data*.xlsx`; `more_biomarkers/*.csv` | Clinical biochemistry markers, blood pressure measures, and targeted or untargeted biomarker panels |
+| **🦠 Microbiome** | `microbiome/*metaphlan*.csv`; `microbiome/*alpha_summary*.csv`; `microbiome/*beta_summary*.csv`; corresponding files under `Liam_microbiome/` | Taxonomic abundance profiles, prevalence/detection metrics, alpha diversity indices, beta diversity summaries |
+| **🧪 Metabolomics (NMR / MS)** | `UpdatedNMRIsabelNieves/*.xls(x)`; `UpdatedNMRLipids_12_25/*.xlsx/.ods`; `more_biomarkers/ms-serum.csv`; `more_biomarkers/ms-urine.csv`; `more_biomarkers/nmr-targeted-serum.csv` | Quantitative metabolite concentrations from serum and urine (NMR targeted; MS-based serum/urine) |
+| **🧬 Lipidomics** | `lipidomics/lipidomics.xlsx`; `lipidomics/lipidomics-dbs-rbc.xlsx`; `UpdatedNMRLipids_12_25/lipidomics_rbc_*.xlsx`; `lipidomic_dbs_*.xlsx` | Lipid molecular species profiles, potentially stratified by DBS/RBC or sample type |
+| **📷 Camera / Site-specific Data** | `camera_data/ICL.xlsx`; `camera_data/Bilbao.xlsx` | Site-specific or camera-derived variables (exact fields defined in source tables) |
 
-The goals of this project are:
-1. Create a machine learning model for binary classification for medical application - detect from tabular data, if an aspirate is malignant or not.
-2. Create automated and reproducible ML pipeline to ensure fluid collaboration and adding of team members.
+Notes:
+- This is a **raw-only** inventory (`data/raw/**`). Processed/derived artifacts are intentionally not documented here.
+- Exact column definitions should be taken from each source file’s schema.
 
-### Data
-#### Dataset
-The project is based on [Breast Cancer Wisconsin dataset](https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data/data) from Kaggle.
-#### Number of samples
-The dataset consists of 569 samples:
-- 357 benign
-- 212 malignant
+## Methods / Models
 
-#### Size
-The dataset consists of a single csv file of 551 kB.
-#### Modality
-The data is **tabular data** with 30 features extracted from images of breast aspirates. The data is spread over 32 columns, of which first one is the id (irrelevant) and second one is the classification (B = benign, M = malignant).
+Experiments are configured with Hydra configs under `src/project_hei/configs/` and run via `src/project_hei/run_experiment.py`.
 
-The cell nucleus characteristics computed from images of fine needle aspirates (FNA) of breast tissue are:
-- radius (mean of distances from center to points on the perimeter)
-- texture (standard deviation of gray-scale values)
-- perimeter
-- area
-- smoothness (local variation in radius lengths)
-- compactness (perimeter^2 / area - 1.0)
-- concavity (severity of concave portions of the contour)
-- concave points (number of concave portions of the contour)
-- symmetry
-- fractal dimension ("coastline approximation" - 1)
+Configured/implemented model families include (see `src/project_hei/hei_package/models.py` and `src/project_hei/configs/experiment/*.yaml`):
+- Gaussian Process Regression (GP)
+- Linear Regression (REG)
+- XGBoost Regressor (XGB)
+- Random Forest (RF)
+- Decision Tree (DT)
+- Bagged kNN (config: `src/project_hei/configs/exp_bagged_knn.yaml`)
 
-The mean, standard error and "worst" or largest (mean of the three
-largest values) of these features were computed for each image,
-resulting in **30 features**.
+Preprocessing / feature engineering includes (configurable in `src/project_hei/configs/prep.yaml`):
+- Standard scaling (via sklearn pipelines)
+- Optional PCA blocks (e.g., MS serum / MS urine / NMR urine)
 
-### Models
+## Project Structure
 
-Initially we will use a standard artificial neural network (ANN).
-
-Similar model has been trained on the same dataset and has shown good performance [ANN Breast Cancer model by Ahmed Hafez](https://www.kaggle.com/code/ahmedtronic/ann-breast-cancer). We have also used some of the code of this submission, e.g. for data preprocessing step.
-
-## Project structure
-
-The project uses [Cookiecutter](https://github.com/cookiecutter/cookiecutter) and is based on [Machine Learning Operations template](https://github.com/SkafteNicki/mlops_template).
-```txt
-├── .dvc                      # Data Version Control
-│   ├── cache
-│   ├── tmp
-│   ├── config
-│   └── config.local
-├── .github/                  # Github actions
-│   └── workflows/
-│       ├── evaluation.yaml
-│       ├── linting.yaml
-│       └── tests.yaml
-├── .secrets/
-│   └── gcp-key.json          # GCP service account key (to be added by user)
-├── .venv/                    # Virtual environment (to be added by user)
-├── configs/
-├── data/                     # Data directory
-│   ├── processed
-│   └── raw
-├── dockerfiles/              # Dockerfiles
-│   ├── api.dockerfile
-│   ├── api_requirements.txt
-│   ├── dvc.dockerfile
-│   ├── streamlit.dockerfile
-│   └── streamlit_requirements.txt
-├── models/                   # Trained models
-├── outputs/
-├── reports/                  # Reports
-│   └── figures/
-├── scripts/                  # Helper scritpt for testing
-├── src/                      # Source code
-│   ├── mlo_group_project/
-│   │   ├──config/            # Configuration files
-│   │   ├──styles/            # Streamlit styles
-│   │   ├──training/          # Training scripts
-│   │   ├── __init__.py
-│   │   ├── api.py
-│   │   ├── data.py
-│   │   ├── evaluate.py
-│   │   ├── guardrails.py
-│   │   ├── model.py
-│   │   ├── streamlit_app.py
-│   │   ├── train.py
-│   │   └── visualize.py
-└── tests/                    # Tests
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── sample_data.pt        # Sample data for tests (to be added automatically when tests are run)
-│   ├── test_data.py
-│   └── test_model.py
-├── wandb/                    # Weights & Biases files
-├── .dvcignore
-├── .env                      # Environment variables (to be added by user)
-├── .gcloudignore
-├── .gitignore
-├── .pre-commit-config.yaml
-├── cloudbuild_api.yaml           # Google Cloud Build file
-├── cloudbuild_stramlit_app.yaml  # Google Cloud Build file
-├── docker-compose.yml            # Docker compose file
-├── dvc.lock                      # DVC lock file
-├── pyproject.toml            # Python project file
-├── README.md                 # Project README
-├── requirements.txt          # Project requirements
-├── requirements_dev.txt      # Project development requirements
-├── tasks.py                  # Project invoke tasks
-└── uv.lock                   # uv lock file
+```text
+Recommender_System/
+  data/
+    raw/                # raw multimodal source data (not committed)
+    process/            # intermediate/processed tables (not committed)
+  src/
+    hei.py
+    project_hei/
+      run_experiment.py
+      configs/
+      hei_package/
+  tests/
 ```
-## How to run
-We use invoke as our primary project CLI to simplify complex commands and DVC to store data.
 
-### Setup
-1. Clone the repository:
-    ```bash
-   git clone https://github.com/kadijairus/mlo_project.git
-   cd mlo_project
-   ```
-2. Install uv (optional, for running scripts):
-   ```bash
-   pip install uv
-   ```
-3. Get credentials for Wandb and Google Cloud service account key.
-4. Save the Google Cloud service account key JSON file to `.secrets/gcp-key.json` in your project root.
-4. Add to .env file (create if it doesn't exist):
-   ```env
-   WANDB_API_KEY=your_wandb_api_key_here
-   GOOGLE_APPLICATION_CREDENTIALS="gcp-key.json"
-   ```
-4. Activate virtual environment:
-   ```bash
-   source .venv/bin/activate  # On Windows use `venv\Scripts\activate`
-   ```
-5. Install the required dependencies and ensure your environment is set up:
-   ```bash
-   uv sync
-   ```
+## Quickstart (Hydra)
 
-### Update data artifacts
+From the repo root:
 
-We use DVC to version heavy artifacts and invoke for commands.
-Use these commands to keep your local environment in sync with the cloud registry.
+```bash
+python -m venv .venv
+source .venv/bin/activate
 
-1. Before running any scripts, you must pull the data artifacts tracked by DVC:
-   ```bash
-   uv run invoke data-pull
-   ```
-2. After running a successful training and reaching a new "best" model upload data using:
-   ```bash
-   uv run invoke promote
-   ```
-3. Pushing data to DVC updates the local dvc.lock file. Commit this to git.
+pip install -r requirements.txt
 
-4. See other invoke tasks in `tasks.py` file or run:
-   ```bash
-   uv run invoke --list
-   ```
+# If needed (Hydra runtime):
+pip install hydra-core omegaconf
 
-### Running the standard pipeline
+# Run default config
+python src/project_hei/run_experiment.py
 
-1. Run preprocess and training if data.py or train.py has changed.
-   ```bash
-   uv run invoke repro
-   ```
+# Override experiment type (examples)
+python src/project_hei/run_experiment.py experiment=GP
+python src/project_hei/run_experiment.py experiment=XGB
+python src/project_hei/run_experiment.py experiment=REG
+```
 
-2. Optional: preprocess and train can be run separately:
-   ```bash
-   uv run invoke preprocess-data
-   uv run invoke train
-   ```
+## GCP + DVC + W&B
 
-3. Promote best model to cloud registry:
-   ```bash
-   uv run invoke promote
-   ```
+This repo includes `scripts/gcp_wandb_pipeline.sh` for cloud integration bootstrap.
 
-4. Run evaluation on the test set
-   ```bash
-   uv run invoke evaluate
-   ```
+- Fixed DVC remote bucket: `gs://serenehe_bucket_1/dvc`
+- Fixed GCP project default in script: `recommender-system-hei`
+- Fixed W&B defaults in script:
+  - entity: `hexiaoyu-czech-technical-university-in-prague`
+  - project: `Recommender System`
 
-5. Run all tests
-   ```bash
-   uv run invoke test
-   ```
+Run from repo root:
 
-### Runnig via the Docker
+```bash
+cd /Users/xiaoyuhe/Recommender_System
 
-All project tasks (data pulling, training, and evaluation) can be executed within a containerized environment to ensure consistency across different machines.
+# Required for W&B login
+export WANDB_API_KEY=<your_wandb_api_key>
 
-1. Setup.
-Build the Docker image: Run this command from the project root to build the specialized DVC/worker image:
+# Optional: if you use a service-account json
+# export GOOGLE_APPLICATION_CREDENTIALS=/abs/path/to/key.json
 
-   ```bash
-   docker build -f dockerfiles/dvc.dockerfile . -t dvc:latest
-   ```
-2. Ensure the prerequisites (GCP Credentials):
-To interact with Google Cloud Storage (e.g., via DVC), you must provide a service account key:
-* Download a GCP Service Account key with Storage Object Admin (or Viewer/Creator) permissions.
-* Save the JSON file to `.secrets/gcp-key.json` in your project root.
+./scripts/gcp_wandb_pipeline.sh
+```
 
-3. Usage. You can run any invoke task (`uv run invoke <task>`) defined in the project by passing it to the docker run command.
+What this script does:
+- Sets active gcloud project.
+- Ensures DVC repo exists and configures default remote to `gs://serenehe_bucket_1/dvc`.
+- Runs `gsutil ls gs://serenehe_bucket_1` access check.
+- Performs W&B login if `WANDB_API_KEY` is provided.
 
-#### Usage examples
+## Data Policy
 
-**To explore the container environment (Interactive Shell):**
-If you need to debug or run multiple commands manually, use the `--entrypoint` override:
-
-   ```
-   docker run --rm -it \
-   -v $(pwd)/.secrets/gcp-key.json:/app/gcp-key.json:ro \
-   -e GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json \
-   --entrypoint sh \
-   dvc:latest
-   ```
-
-**To run a specific task (e.g., pulling data):**
-
-   ```
-   docker run --rm -it \
-   -v $(pwd)/.secrets/gcp-key.json:/app/gcp-key.json:ro \
-   -e GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json \
-   dvc:latest data-pull
-   ```
-
-### Monitoring and profiling
-
-We use Hydra for configuration management.
-We use WandB to monitor training.
-Training progress and model artifacts are automatically logged to Weights & Biases dashboard.
-
-1. Run training with performance profiling enabled:
-   ```bash
-   uv run invoke train-profile
-   ```
-2. Visualise results:
-   ```bash
-   snakeviz reports/train_profile.prof
-   ```
-
-### Inference API & User Interface to Evaluate the Model (Three Options)
-
-This project features a **FastAPI backend** for programmatic model inference and a **Streamlit frontend** for
-interactive spatial data evaluation.
-
-#### API: Local Development (via Invoke)
-
-The easiest way to run the services locally for development is using our `invoke` tasks.
-
->Prerequisites: Ensure that `models/best_model.pt` and the required preprocessing files (scalers, encoders) are present in the `data/processed/` directory before starting.
-
-1. Start the backend API server:
-   ```bash
-   uv run invoke serve-api
-   ```
-2. Start the frontend UI server:
-   ```bash
-   uv run invoke serve-ui
-   ```
-3. Usage:
-* Open your browser and navigate to http://localhost:8501.
-
-* Under the "Upload dataset" section, select a .csv file containing your samples.
-
-* Click "Evaluate Dataset" to generate predictions from the model.
-
-#### API: Containerized Deployment (via Docker)
-To ensure environment consistency and simplify dependency management, we provide a `docker-compose.yml` file to orchestrate both services in parallel.
-
-1. Build and launch the containers:
-
-   ```
-   docker compose up --build
-   ```
-
-2. Accessing the services:
-
-Frontend UI: Navigate to http://localhost:8501.
-
-Backend API: Available at http://localhost:8000
-
-
-#### API: Cloud Production (Google Cloud Platform)
-The evaluation services are deployed on **Google Cloud Run**, providing a scalable and highly available production environment.
-* Live User Interface: [streamlit-app-934984265576.europe-west1.run.app](https://streamlit-app-934984265576.europe-west1.run.app/)
-> **MLOps Note**: The UI service is linked to the API through the API_URL environment variable. If redeploying the API, ensure the UI's environment variable is updated to point to the new service URL to maintain connectivity.
-
-## App instructions
-The application allows users to upload a dataset for model evaluation:
-
-![Upload dataset](reports/figures/app_upload_data.png)
-
-Once the dataset is uploaded, the application evaluates the model’s performance and displays the results:
-
-![Results](reports/figures/app_results.png)
+Raw datasets are not pushed to GitHub (see `.gitignore`). To reproduce results, place the expected source files under `data/raw/`.

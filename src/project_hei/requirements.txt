@@ -1,0 +1,33 @@
+pandas
+numpy
+scikit-learn
+xgboost
+matplotlib
+seaborn
+panel
+streamlit
+scipy
+hydra-core
+omegaconf
+pyyaml
+hydra-core
+omegaconf
+pyyaml
+# Core scientific stack
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+scipy
+omegaconf
+hydra-core
+xgboost
+
+# Optional (for notebook, visualization, etc.)
+jupyter
+ipython
+
+# Project-specific
+# If you use any custom packages, add them here
+openpyxl

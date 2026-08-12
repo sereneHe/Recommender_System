@@ -1,0 +1,9 @@
+{
+  "data_path": "/path/to/prep_data.csv",
+  "food_feats": ["feat1", "feat2", "feat3"],
+  "non_food_feats": ["nf1", "nf2"],
+  "target_columns": ["GLU (mg/dL)"],
+  "model_type": "gp",
+  "n_runs": 50,
+  "n_select_features": 5
+}

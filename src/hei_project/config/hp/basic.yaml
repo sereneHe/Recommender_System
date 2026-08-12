@@ -1,5 +1,0 @@
-# Hyperparameters that can be swapped via: hp=basic / hp=large / hp=debug
-
-solver:
-  n_select_features: 5
-  n_runs: 40

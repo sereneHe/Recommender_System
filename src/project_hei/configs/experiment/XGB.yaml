@@ -1,0 +1,5 @@
+model:
+  name: XGB
+runtime:
+  n_runs: 40
+  n_select_features: 5

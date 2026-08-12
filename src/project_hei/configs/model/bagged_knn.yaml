@@ -1,0 +1,7 @@
+name: bagged_knn
+
+bagging:
+  n_estimators: 50
+
+knn:
+  n_neighbors: 10

@@ -1,0 +1,24 @@
+target:
+  name: "GLU (mg/dL)"
+
+model:
+  name: XGB
+
+features:
+  base:
+    - age
+    - gender_numeric
+    - stress_index
+    - fatigue_index
+  anthropometric:
+    - weight
+    - height
+  microbiome:
+    include_patterns:
+      - "microb_clean15_"
+  metabolomics:
+    include_patterns:
+      - "dbs_rbc_lip"
+  extra:
+    - GMWI
+    - microbiome_Shannon

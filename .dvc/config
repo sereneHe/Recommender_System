@@ -1,7 +1,4 @@
 [core]
-    remote = remote_storage
-[remote "remote_storage"]
-    url = gs://kadis-bucket/
-    version_aware = true
-    credentialpath = ../.secrets/gcp-key.json
-
+    remote = gcs_remote
+['remote "gcs_remote"']
+    url = gs://serenehe_bucket_1/dvc

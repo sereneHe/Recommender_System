@@ -1,0 +1,15 @@
+defaults:
+  - data: default
+  - model: bagged_knn
+
+seed: 2227070966
+
+experiment:
+  n_splits: 300
+  test_ratio: 0.3
+  corr_type: kendalltau
+  percentile_clip: 3
+
+target:
+  name: bfm_(body_fat_mass)
+  normalized: true

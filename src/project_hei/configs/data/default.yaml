@@ -1,0 +1,6 @@
+paths:
+  hei: /Users/xiaoyuhe/Recommender_System/data/process/HEI/hei.pkl
+  hei_full: /Users/xiaoyuhe/Recommender_System/data/process/HEI/hei_full.pkl
+  energy_expenditure: /Users/xiaoyuhe/Recommender_System/data/process/expenditure.pkl
+  average_expenditure: /Users/xiaoyuhe/Recommender_System/data/process/energy_expenditure/average_expenditure.pkl
+  blood_data: /Users/xiaoyuhe/Recommender_System/data/process/blood_data.pkl

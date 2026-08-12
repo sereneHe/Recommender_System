@@ -1,0 +1,27 @@
+target:
+  name: "GLU (mg/dL)"
+
+model:
+  name: GP
+runtime:
+  n_runs: 40
+  n_select_features: 5
+
+features:
+  base:
+    - age
+    - gender_numeric
+    - stress_index
+    - fatigue_index
+  anthropometric:
+    - weight
+    - height
+  microbiome:
+    include_patterns:
+      - "microb_clean15_"
+  metabolomics:
+    include_patterns:
+      - "dbs_rbc_lip"
+  extra:
+    - GMWI
+    - microbiome_Shannon
