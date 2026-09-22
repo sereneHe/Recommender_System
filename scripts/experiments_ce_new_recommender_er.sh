@@ -298,15 +298,17 @@ fi
 # scripts/replay_er_sf_baselines.sh.  All use the true DAG
 # (recalculate_dag=false) so the comparison isolates the predictor.
 if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
-  # B0: HC NN predictor with the true W moment (ALM backend, no CE).
-  run_phase1_synthetic_nn_baseline "b0_hc_predictor_alm" "hc_predictor" "alm" \
+  # B0: HC NN predictor with the true W moment (ALM by default, no CE).
+  HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
+  run_phase1_synthetic_nn_baseline "b0_hc_predictor_${HC_BASELINE_BACKEND}" "hc_predictor" "${HC_BASELINE_BACKEND}" \
     "${BASELINE_NN_COMMON[@]}"
 
   # B1/B2: MARK and MARK-CC tree baselines.
   run_phase1_synthetic_tree "b1_mark" "mark"
   run_phase1_synthetic_tree "b2_mark_with_cc" "mark_with_cc" \
     "solver.n_outer=${N_OUTER}" \
-    "solver.time_limit=${TIME_LIMIT}"
+    "solver.time_limit=${TIME_LIMIT}" \
+    "+solver.w_matrix_space=raw_sem"
 fi
 
 echo "=== CE-NEW-ER complete ==="

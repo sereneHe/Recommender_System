@@ -6,7 +6,8 @@
 # variance is higher and redundant deep conditioning sets should be pruned.
 # We therefore use slightly higher shrinkage, keep the W constraint enabled
 # (hub structures make W moment constraints reliable), and prune redundant
-# separators.  recalculate_dag=false selects the true SEM / true DAG.
+# separators.  recalculate_dag=false selects the true SEM / true DAG.  B0--B2
+# provide the matched hc_predictor, mark, and mark_with_cc references.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
@@ -81,6 +82,32 @@ CE_COMMON=(
   "solver.constraint_audit_oracle=synthetic_linear_sem"
 )
 
+# hc_predictor does not define use_stochastic_constrained_optimizer, so keep
+# its matched baseline overrides separate from the HC-CE array above.
+BASELINE_NN_COMMON=(
+  "solver.time_limit=${TIME_LIMIT}"
+  "solver.n_runs=${N_RUNS}"
+  "solver.n_outer=${N_OUTER}"
+  "solver.n_inner=${N_INNER}"
+  "solver.feature_selector=none"
+  "solver.dag_fit_scope=inner_train"
+  "solver.constraint_audit_enabled=true"
+  "solver.ci_target_related_only=true"
+  "solver.ci_target_constraint_role=endpoint"
+  "solver.ce_use_balanced_batches=false"
+  "solver.ce_batch_size=128"
+  "solver.recalculate_dag=false"
+  "solver.constrained=true"
+  "solver.use_w_constraints=true"
+  "solver.w_matrix_space=raw_sem"
+  "solver.use_ci_penalty=false"
+  "solver.constraint_audit_oracle=synthetic_linear_sem"
+  "++problem.n_samples=${N_SAMPLES}"
+  "++problem.n_nodes=${N_NODES}"
+  "++problem.expected_edges=${EXPECTED_EDGES}"
+  "++problem.sem_type=gauss"
+)
+
 run_phase1_synthetic_ce_new() {
   local label="$1"
   shift 1
@@ -111,6 +138,81 @@ run_phase1_synthetic_ce_new() {
   done
 }
 
+run_phase1_synthetic_nn_baseline() {
+  local label="$1"
+  local solver="$2"
+  local backend="$3"
+  shift 3
+
+  local graph_seed noise_seed model_seed
+  for graph_seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${graph_seed}" =~ ^[0-9]+$ ]] || die "Invalid GRAPH_SEEDS value ${graph_seed}."
+    for noise_seed in "${CE_NEW_NOISE_SEEDS[@]}"; do
+      [[ "${noise_seed}" =~ ^[0-9]+$ ]] || die "Invalid NOISE_SEEDS value ${noise_seed}."
+      model_seed="$((graph_seed * 100000 + noise_seed))"
+      export HC_SPBM_RANDOM_SEED="${model_seed}"
+      export HC_CONSTRAINT_BACKEND="${backend}"
+      local -a seed_overrides=(
+        "solver.random_state=${model_seed}"
+        "solver.cv_random_state=$((model_seed + 10000))"
+        "solver.validation_random_state=$((model_seed + 20000))"
+        "++problem.seed=${graph_seed}"
+        "++problem.graph_seed=${graph_seed}"
+        "++problem.noise_seed=${noise_seed}"
+      )
+      if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
+        run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
+          "${solver}" "${PROBLEMS}" "${seed_overrides[@]}" "$@" "${PLAN_EXTRA_OVERRIDES[@]}"
+      else
+        run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
+          "${solver}" "${PROBLEMS}" "${seed_overrides[@]}" "$@"
+      fi
+    done
+  done
+}
+
+run_phase1_synthetic_tree_baseline() {
+  local label="$1"
+  local solver="$2"
+  shift 2
+
+  local graph_seed noise_seed model_seed
+  for graph_seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${graph_seed}" =~ ^[0-9]+$ ]] || die "Invalid GRAPH_SEEDS value ${graph_seed}."
+    for noise_seed in "${CE_NEW_NOISE_SEEDS[@]}"; do
+      [[ "${noise_seed}" =~ ^[0-9]+$ ]] || die "Invalid NOISE_SEEDS value ${noise_seed}."
+      model_seed="$((graph_seed * 100000 + noise_seed))"
+      local -a seed_overrides=(
+        "solver.random_state=${model_seed}"
+        "solver.n_runs=${N_RUNS}"
+        "solver.recalculate_dag=false"
+        "+solver.cv_strategy=site_gender"
+        "+solver.cv_time_test_size=null"
+        "+solver.cv_time_gap=0"
+        "++problem.seed=${graph_seed}"
+        "++problem.graph_seed=${graph_seed}"
+        "++problem.noise_seed=${noise_seed}"
+      )
+      if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
+        run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
+          "${solver}" "${PROBLEMS}" "${seed_overrides[@]}" "$@" "${PLAN_EXTRA_OVERRIDES[@]}"
+      else
+        run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
+          "${solver}" "${PROBLEMS}" "${seed_overrides[@]}" "$@"
+      fi
+    done
+  done
+}
+
+# E0: no-constraint reference with the same HC-CE network and CV protocol.
+run_phase1_synthetic_ce_new "e0_no_constraint" \
+  "${COMMON[@]}" \
+  "solver.constrained=false" \
+  "solver.recalculate_dag=false" \
+  "solver.use_w_constraints=false" \
+  "solver.use_ci_penalty=false" \
+  "solver.constraint_audit_oracle=none"
+
 # E1: true-W reference.
 run_phase1_synthetic_ce_new "e1_true_w" \
   "${COMMON[@]}" \
@@ -132,5 +234,18 @@ run_phase1_synthetic_ce_new "e2_pure_ce_upgraded" \
 run_phase1_synthetic_ce_new "e3_w_plus_ce_upgraded" \
   "${COMMON[@]}" \
   "${CE_COMMON[@]}"
+
+# B0--B2 are additional predictor baselines, paired with E0--E3 on the same
+# graph, innovation, model, and CV seeds.  Set INCLUDE_BASELINES=0 to omit
+# them during a quick CE-only screen.
+if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
+  HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
+  run_phase1_synthetic_nn_baseline "b0_hc_predictor_${HC_BASELINE_BACKEND}" \
+    "hc_predictor" "${HC_BASELINE_BACKEND}" "${BASELINE_NN_COMMON[@]}"
+  run_phase1_synthetic_tree_baseline "b1_mark" "mark"
+  run_phase1_synthetic_tree_baseline "b2_mark_with_cc" "mark_with_cc" \
+    "solver.n_outer=${N_OUTER}" "solver.time_limit=${TIME_LIMIT}" \
+    "+solver.w_matrix_space=raw_sem"
+fi
 
 echo "=== CE-NEW-SF complete ==="
