@@ -954,12 +954,17 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
         oracle_raw = raw_x @ weights[:-1, -1]
         return (oracle_raw - float(self._y_mean)) / float(self._y_std)
 
-    def constraint_audit_rows(self, X, y, *, fold, stage="outer_test"):
+    def constraint_audit_rows(self, X, y, *, fold, stage="outer_test", tolerance_reference=None):
         """Evaluate fitted CI/W constraints on held-out rows without retraining.
 
         The returned rows intentionally retain both the raw signed statistic
         and the statistic used by the dependent penalty.  This makes a
         positive-direction dependence margin auditable rather than implicit.
+
+        ``tolerance_reference`` is an optional ``(X_ref, y_ref)`` pair used to
+        build SE-based independence tolerances.  Callers auditing a held-out
+        fold must pass the training fold here; otherwise the tolerance (and the
+        violation derived from it) would be calibrated on the held-out labels.
         """
         if self._rf_model_ is None:
             return [], [], []
@@ -1010,11 +1015,23 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             tolerance_by_index = {}
             if independent_indices:
                 independent_specs = [specs[index] for index in independent_indices]
-                observed_tensor = torch.as_tensor(y_observed, dtype=torch.float32)
+                if tolerance_reference is not None:
+                    ref_X, ref_y = tolerance_reference
+                    reference_x_tensor = torch.as_tensor(
+                        self.scaler_.transform(ref_X), dtype=torch.float32
+                    )
+                    reference_observed = torch.as_tensor(
+                        (np.asarray(ref_y, dtype=float).reshape(-1) - float(self._y_mean))
+                        / float(self._y_std),
+                        dtype=torch.float32,
+                    )
+                else:
+                    reference_x_tensor = x_tensor
+                    reference_observed = torch.as_tensor(y_observed, dtype=torch.float32)
                 with torch.no_grad():
                     effective_tolerances = independent_expectation_tolerances(
-                        x_tensor,
-                        observed_tensor,
+                        reference_x_tensor,
+                        reference_observed,
                         independent_specs,
                         tolerance=tolerance,
                         cfg=self.cfg,

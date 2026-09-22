@@ -60,7 +60,11 @@ class StochasticConstrainedOptimizerState:
 
     def __init__(self, model, cfg):
         self.enabled = bool(getattr(cfg, "use_stochastic_constrained_optimizer", False))
-        self.prox_mu = float(getattr(cfg, "sco_prox_mu", 0.0)) if self.enabled else 0.0
+        # A no-constraint (pure-MSE) arm must not inherit proximal
+        # regularization, so gate the proximal term on the constraint switch
+        # rather than only on the optimizer switch.
+        self.prox_active = self.enabled and bool(getattr(cfg, "constrained", True))
+        self.prox_mu = float(getattr(cfg, "sco_prox_mu", 0.0)) if self.prox_active else 0.0
         self.prox_center_decay = float(getattr(cfg, "sco_prox_center_decay", 0.95))
         self.dual_ema_gamma = float(getattr(cfg, "sco_dual_ema_gamma", 0.0))
         self.use_adaptive_penalty = bool(getattr(cfg, "sco_use_adaptive_penalty", False))
@@ -76,7 +80,7 @@ class StochasticConstrainedOptimizerState:
         ]
 
     def apply_prox_gradient(self, model):
-        if not self.enabled or self.prox_mu <= 0.0:
+        if not self.prox_active or self.prox_mu <= 0.0:
             return
         with torch.no_grad():
             center_idx = 0
@@ -88,7 +92,7 @@ class StochasticConstrainedOptimizerState:
                 center_idx += 1
 
     def update_prox_center(self, model):
-        if not self.enabled or self.prox_mu <= 0.0:
+        if not self.prox_active or self.prox_mu <= 0.0:
             return
         decay = self.prox_center_decay
         with torch.no_grad():

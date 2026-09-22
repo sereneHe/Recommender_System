@@ -15,13 +15,18 @@
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
-announce_stage "CE-NEW-ER" "Synthetic ER: pure-CE vs true-W vs W+CE"
-
 GRAPH_SEEDS="${GRAPH_SEEDS:-${SEEDS:-42 43 44}}"
 NOISE_SEEDS="${NOISE_SEEDS:-101}"
 SEEDS="${GRAPH_SEEDS}"
-PROBLEMS="${PROBLEMS:-synthetic_er,synthetic_sf}"
+# _common.sh parsed PLAN_SEEDS from SEEDS before this block ran, so re-derive
+# it here; otherwise a GRAPH_SEEDS-only override is silently ignored.
+read -r -a PLAN_SEEDS <<< "${SEEDS//,/ }"
+
+announce_stage "CE-NEW-ER" "Synthetic ER: pure-CE vs true-W vs W+CE"
+
+PROBLEMS="${PROBLEMS:-synthetic_er}"
 EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-PLAN_CE_NEW_ER}"
+CE_CONSTRAINT_BACKEND="${CE_CONSTRAINT_BACKEND:-alm_pbm}"
 TIME_LIMIT="${TIME_LIMIT:-120}"
 N_RUNS="${N_RUNS:-5}"
 N_OUTER="${N_OUTER:-10}"
@@ -30,7 +35,6 @@ N_SAMPLES="${N_SAMPLES:-1000}"
 N_NODES="${N_NODES:-10}"
 EXPECTED_EDGES="${EXPECTED_EDGES:-15}"
 
-export HC_CONSTRAINT_BACKEND="${HC_CONSTRAINT_BACKEND:-alm}"
 export HC_WEIBULL_GAUSSIANIZE=0
 # For synthetic data the graph is known, so BD post-hoc filtering is not needed
 # when constraints come from the true DAG.
@@ -64,6 +68,7 @@ COMMON=(
 # linear residualization, cross-window SE, and a tight 95% tolerance.
 CE_COMMON=(
   "solver.constrained=true"
+  "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}"
   "solver.recalculate_dag=false"
   "solver.w_matrix_space=raw_sem"
   "solver.use_ci_penalty=true"
@@ -124,6 +129,7 @@ run_phase1_synthetic_ce_new "e0_no_constraint" \
 run_phase1_synthetic_ce_new "e1_true_w" \
   "${COMMON[@]}" \
   "solver.constrained=true" \
+  "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
   "solver.recalculate_dag=false" \
   "solver.w_matrix_space=raw_sem" \
   "solver.use_w_constraints=true" \

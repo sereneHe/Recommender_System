@@ -10,13 +10,17 @@
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
-announce_stage "CE-NEW-SF" "Synthetic Scale-Free: W-Plus-CE with hub pruning"
-
 GRAPH_SEEDS="${GRAPH_SEEDS:-${SEEDS:-42 43 44}}"
 NOISE_SEEDS="${NOISE_SEEDS:-101}"
 SEEDS="${GRAPH_SEEDS}"
+# See the ER wrapper: PLAN_SEEDS was parsed before GRAPH_SEEDS existed.
+read -r -a PLAN_SEEDS <<< "${SEEDS//,/ }"
+
+announce_stage "CE-NEW-SF" "Synthetic Scale-Free: W-Plus-CE with hub pruning"
+
 PROBLEMS="${PROBLEMS:-synthetic_sf}"
 EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-PLAN_CE_NEW_SF}"
+CE_CONSTRAINT_BACKEND="${CE_CONSTRAINT_BACKEND:-alm_pbm}"
 TIME_LIMIT="${TIME_LIMIT:-120}"
 N_RUNS="${N_RUNS:-5}"
 N_OUTER="${N_OUTER:-10}"
@@ -25,7 +29,6 @@ N_SAMPLES="${N_SAMPLES:-1000}"
 N_NODES="${N_NODES:-10}"
 EXPECTED_EDGES="${EXPECTED_EDGES:-15}"
 
-export HC_CONSTRAINT_BACKEND="${HC_CONSTRAINT_BACKEND:-alm}"
 export HC_WEIBULL_GAUSSIANIZE=0
 export HC_CE_BD_MCMC="${HC_CE_BD_MCMC:-0}"
 
@@ -57,6 +60,7 @@ COMMON=(
 # to stop hub paths from generating overly deep conditioning sets.
 CE_COMMON=(
   "solver.constrained=true"
+  "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}"
   "solver.recalculate_dag=false"
   "solver.w_matrix_space=raw_sem"
   "solver.use_w_constraints=true"
@@ -111,6 +115,7 @@ run_phase1_synthetic_ce_new() {
 run_phase1_synthetic_ce_new "e1_true_w" \
   "${COMMON[@]}" \
   "solver.constrained=true" \
+  "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
   "solver.recalculate_dag=false" \
   "solver.w_matrix_space=raw_sem" \
   "solver.use_w_constraints=true" \

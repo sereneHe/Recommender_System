@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Summarize CE pre-audit artifacts and emit a three-stage Go/No-Go gate.
+"""Summarize CE pre-audit artifacts and emit a staged screening report.
 
 The gate mirrors the corrected pre-screening design: it decides only on
-constraint quality (A: how many d-separation constraints survive and how
-reliably they recur across seeds; B: how well the statistic is estimated
-across time windows/folds) plus a small paired screening comparison
-(C: DNN-only vs W+CE-Lite).  The violation-vs-test-error correlation is
+constraint quality (A: how many independent d-separation constraints survive
+and how reliably they recur across seeds; B applies only to directional
+dependence constraints, whose target is nonzero) plus a paired screening
+comparison (C: W+CE-Lite vs W-only). The violation-vs-test-error correlation is
 *not* part of the gate; it is reported as descriptive only because it is
 confounded by baseline fit quality, small fold counts, and wrong-DAG
 reverse causality.
 
-Stage C uses the same folds that produced the screening metrics, so the
-gate is a screening filter, not a final held-out verdict.  Thresholds are
-CLI-configurable; defaults follow the plan (>=3 constraints, >=60% seed
-support, SNR >= 2.0, sign-flip <= 30%, CE-Lite win rate >= 60%).
+Independent constraints target zero: their |mean|/spread ratio and sign flips
+are descriptive and must not be used as a Go/No-Go gate. Stage C uses the
+same folds that produced the screening metrics, so the gate is a screening
+filter, not a final held-out verdict. Defaults require >=3 constraints,
+>=60% seed support, and >=60% paired wins over W-only.
 """
 
 import argparse
@@ -55,13 +56,18 @@ def _dataset_key(config):
 
 def _arm_key(config):
     solver = config.get("solver", {}) if isinstance(config, dict) else {}
+    solver_name = str(solver.get("name", ""))
     constrained = bool(solver.get("constrained", True))
     use_ci = bool(solver.get("use_ci_penalty", False))
     use_w = bool(solver.get("use_w_constraints", False))
-    if not constrained and not use_ci:
+    if solver_name == "mark":
+        arm = "mark"
+    elif not constrained and not use_ci:
         arm = "dnn_only"
     elif use_ci:
         arm = "ce_active"
+    elif use_w:
+        arm = "w_only"
     else:
         arm = "other_constrained"
     return f"{arm};W={int(use_w)};CI={solver.get('ci_penalty_kind', 'unknown')}"
@@ -124,11 +130,11 @@ def _apply_gate(runs, stability, paired, thresholds):
 
     paired_agg = {}
     if isinstance(paired, pd.DataFrame) and not paired.empty and "dataset" in paired:
-        if "ce_lite_win_rate" in paired and "n_paired_seeds" in paired:
+        if "ce_lite_win_rate_vs_w_only" in paired and "n_paired_seeds_vs_w_only" in paired:
             for _, row in paired.drop_duplicates("dataset").iterrows():
                 paired_agg[row["dataset"]] = (
-                    row.get("ce_lite_win_rate"),
-                    row.get("n_paired_seeds"),
+                    row.get("ce_lite_win_rate_vs_w_only"),
+                    row.get("n_paired_seeds_vs_w_only"),
                 )
 
     gate_rows = []
@@ -136,14 +142,16 @@ def _apply_gate(runs, stability, paired, thresholds):
         dataset_runs = work[work["dataset"] == dataset]
         dataset_ce_runs = ce_runs[ce_runs["dataset"] == dataset]
 
-        # Stage A: cross-seed constraint quantity and support.
+        # Stage A: count/support only d-separation independence constraints.
         if not stability_ce.empty:
             keys = stability_ce[stability_ce["dataset"] == dataset]
         else:
             keys = stability_ce
+        if not keys.empty:
+            keys = keys[keys["constraint_key"].astype(str).str.startswith("independent|")]
         n_union = int(keys["constraint_key"].nunique()) if not keys.empty else 0
         if not keys.empty:
-            support = keys.drop_duplicates("constraint_key")["run_support_rate"]
+            support = keys.drop_duplicates("constraint_key")["seed_support_rate"]
             support_fraction = float((support >= thresholds["min_support_rate"]).mean())
         else:
             support_fraction = 0.0
@@ -152,22 +160,49 @@ def _apply_gate(runs, stability, paired, thresholds):
             and support_fraction >= thresholds["min_support_rate"]
         )
 
-        # Stage B: statistic estimability. Prefer explicit windows; fall back
-        # to cross-fold spread when windows are unavailable (e.g. HAC-only
-        # monthly data with too few rows for five >=100-row windows).
-        snr_window = _median_or_none(dataset_ce_runs.get("median_window_abs_mean_over_spread"))
-        flip_window = _median_or_none(dataset_ce_runs.get("median_window_sign_flip_rate_descriptive"))
-        if snr_window is not None:
-            snr_value, snr_source = snr_window, "window"
+        # For an independence null, the statistic is expected to be near zero;
+        # |mean|/spread and sign flips are not valid Go criteria. Stage B is
+        # applicable only if directional dependence constraints are present.
+        n_dependent = (
+            int(
+                pd.to_numeric(
+                    dataset_ce_runs.get("n_dependent_constraints"), errors="coerce"
+                ).fillna(0).gt(0).sum()
+            )
+            if not dataset_ce_runs.empty
+            else 0
+        )
+        n_independent_median = _median_or_none(
+            dataset_ce_runs.get("n_independent_constraints")
+        )
+        n_dependent_median = _median_or_none(
+            dataset_ce_runs.get("n_dependent_constraints")
+        )
+        null_compatibility_median = _median_or_none(
+            dataset_ce_runs.get("observed_independence_tolerance_compatibility_rate")
+        )
+        if n_dependent:
+            snr_window = _median_or_none(dataset_ce_runs.get("median_window_abs_mean_over_spread"))
+            flip_window = _median_or_none(dataset_ce_runs.get("median_window_sign_flip_rate_descriptive"))
+            if snr_window is not None:
+                snr_value, snr_source = snr_window, "window"
+            else:
+                snr_value, snr_source = _median_or_none(dataset_ce_runs.get("median_fold_abs_mean_over_sd")), "fold"
+            if flip_window is not None:
+                flip_value, flip_source = flip_window, "window"
+            else:
+                flip_value, flip_source = _median_or_none(dataset_ce_runs.get("median_fold_sign_flip_rate")), "fold"
+            snr_ok = snr_value is not None and snr_value >= thresholds["min_window_snr"]
+            flip_ok = flip_value is None or flip_value <= thresholds["max_sign_flip_rate"]
+            stage_b_pass = bool(snr_ok and flip_ok)
+            stage_b_status = "directional_dependence_gate"
         else:
-            snr_value, snr_source = _median_or_none(dataset_ce_runs.get("median_fold_abs_mean_over_sd")), "fold"
-        if flip_window is not None:
-            flip_value, flip_source = flip_window, "window"
-        else:
-            flip_value, flip_source = _median_or_none(dataset_ce_runs.get("median_fold_sign_flip_rate")), "fold"
-        snr_ok = snr_value is not None and snr_value >= thresholds["min_window_snr"]
-        flip_ok = flip_value is None or flip_value <= thresholds["max_sign_flip_rate"]
-        stage_b_pass = bool(snr_ok and flip_ok)
+            snr_value = None
+            snr_source = "not_applicable_for_independence_null"
+            flip_value = None
+            flip_source = "not_applicable_for_independence_null"
+            stage_b_pass = True
+            stage_b_status = "not_applicable_independence_null"
 
         # Stage C: paired screening comparison.
         win_rate, n_paired = paired_agg.get(dataset, (None, None))
@@ -187,8 +222,8 @@ def _apply_gate(runs, stability, paired, thresholds):
             reasons.append("B:snr/sign_flip")
         if not stage_c_pass:
             reasons.append("C:paired_win_rate")
-        # The pre-audit gate decides Go/No-Go from constraint quality alone
-        # (A and B) because it runs before the paired CE-Lite comparison.
+        # Pre-audit only advances stable independence sets to a paired screen.
+        # Stage C, compared with W-only, is required for an efficacy decision.
         preaudit_pass = bool(stage_a_pass and stage_b_pass)
         gate_rows.append(
             {
@@ -198,10 +233,14 @@ def _apply_gate(runs, stability, paired, thresholds):
                 "stage_a_n_constraints_union": n_union,
                 "stage_a_support_fraction": support_fraction,
                 "stage_a_pass": bool(stage_a_pass),
+                "median_independent_constraints_per_run": n_independent_median,
+                "median_dependent_constraints_per_run": n_dependent_median,
+                "median_observed_independence_tolerance_compatibility_rate": null_compatibility_median,
                 "stage_b_snr": snr_value,
                 "stage_b_snr_source": snr_source,
                 "stage_b_sign_flip_rate": flip_value,
                 "stage_b_sign_flip_source": flip_source,
+                "stage_b_status": stage_b_status,
                 "stage_b_pass": bool(stage_b_pass),
                 "stage_c_win_rate": win_rate,
                 "stage_c_n_paired_seeds": n_paired,
@@ -214,47 +253,79 @@ def _apply_gate(runs, stability, paired, thresholds):
     return pd.DataFrame(gate_rows)
 
 
-def summarize(root, output_dir, thresholds=None):
+def summarize(root, output_dir, thresholds=None, experiment_prefix=None, planned_runs=None):
     root = Path(root).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve() if output_dir else root
     run_rows = []
     stability_rows = []
+    coverage = {"included": 0, "excluded_by_prefix": 0, "missing_metrics": 0}
+    missing_metrics_rows = []
 
-    for metadata_path in sorted(root.rglob("constraint_metadata.csv")):
-        run_dir = metadata_path.parent
+    for config_path in sorted(root.rglob("config.yaml")):
+        run_dir = config_path.parent
+        metadata_path = run_dir / "constraint_metadata.csv"
         stats_path = run_dir / "constraint_stat_audit.csv"
         metrics_path = run_dir / "cv_fold_metrics.csv"
-        config_path = run_dir / "config.yaml"
-        if not stats_path.exists() or not config_path.exists():
-            continue
         config = _read_yaml(config_path)
+        experiment_name = str(config.get("experiment", "")) if isinstance(config, dict) else ""
+        if experiment_prefix and not experiment_name.startswith(experiment_prefix):
+            coverage["excluded_by_prefix"] += 1
+            continue
+        if not metrics_path.exists():
+            # A run that never wrote fold metrics crashed or hit the walltime
+            # limit.  Keep it visible instead of silently dropping it, or the
+            # paired comparison becomes a survivors-only view.
+            coverage["missing_metrics"] += 1
+            missing_metrics_rows.append(
+                {
+                    "run_dir": str(run_dir),
+                    "experiment": experiment_name,
+                    "has_metadata": metadata_path.exists(),
+                    "has_stat_audit": stats_path.exists(),
+                }
+            )
+            continue
+        coverage["included"] += 1
         solver = config.get("solver", {}) if isinstance(config, dict) else {}
         dataset = _dataset_key(config)
         arm = _arm_key(config)
         run_id = str(run_dir)
         seed = solver.get("random_state")
         try:
-            metadata = pd.read_csv(metadata_path).fillna("")
-            stats = pd.read_csv(stats_path)
+            metadata = pd.read_csv(metadata_path).fillna("") if metadata_path.exists() else pd.DataFrame()
+            stats = pd.read_csv(stats_path) if stats_path.exists() else pd.DataFrame()
         except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError):
             continue
         if metadata.empty:
             constraint_counts = pd.Series(dtype=float)
             keys = set()
+            relation_counts = {"independent": 0, "dependent": 0}
         else:
             metadata["constraint_key"] = metadata.apply(_constraint_key, axis=1)
             constraint_counts = metadata.groupby("fold").size()
             keys = set(metadata["constraint_key"].tolist())
+            unique_metadata = metadata.drop_duplicates("constraint_key")
+            relation_counts = unique_metadata["relation"].astype(str).value_counts().to_dict()
 
-        train_stats = stats[stats.get("evaluation_split", "") == "outer_train"].copy()
+        train_stats = (
+            stats[stats["evaluation_split"] == "outer_train"].copy()
+            if "evaluation_split" in stats
+            else stats.copy()
+        )
         if not train_stats.empty:
             if "constraint_key" not in train_stats:
                 train_stats["constraint_key"] = train_stats.apply(_constraint_key, axis=1)
             raw_stat = pd.to_numeric(train_stats.get("observed_y_statistic"), errors="coerce")
             train_stats["observed_y_statistic"] = raw_stat
+            if "relation" in train_stats:
+                dependent_stats = train_stats[train_stats["relation"].astype(str) == "dependent"]
+                independent_stats = train_stats[train_stats["relation"].astype(str) == "independent"]
+            else:
+                dependent_stats = train_stats.iloc[0:0]
+                independent_stats = train_stats
             group_snr = []
             group_sign_flip = []
-            for _, group in train_stats.groupby("constraint_key"):
+            for _, group in dependent_stats.groupby("constraint_key"):
                 values = group["observed_y_statistic"].dropna().to_numpy(dtype=float)
                 if len(values) >= 2:
                     scale = float(values.std(ddof=0))
@@ -266,17 +337,35 @@ def summarize(root, output_dir, thresholds=None):
                         )
             median_fold_snr = pd.Series([v for v in group_snr if v is not None]).median() if group_snr else None
             median_fold_flip = pd.Series(group_sign_flip).median() if group_sign_flip else None
-            window_snr = pd.to_numeric(
-                train_stats.get("window_abs_mean_over_spread"), errors="coerce"
-            ).median()
-            window_sign_flip = pd.to_numeric(
-                train_stats.get("window_sign_flip_rate"), errors="coerce"
-            ).median()
-            mean_train_violation = pd.to_numeric(
-                train_stats.get("prediction_violation"), errors="coerce"
-            ).mean()
+            window_snr = _median_or_none(
+                dependent_stats.get("window_abs_mean_over_spread")
+            )
+            window_sign_flip = _median_or_none(
+                dependent_stats.get("window_sign_flip_rate")
+            )
+            null_violation = (
+                pd.to_numeric(independent_stats["observed_violation"], errors="coerce").dropna()
+                if "observed_violation" in independent_stats
+                else pd.Series(dtype=float)
+            )
+            null_compatibility_rate = (
+                float((null_violation <= 1e-12).mean()) if len(null_violation) else None
+            )
+            median_abs_observed_independence = (
+                pd.to_numeric(
+                    independent_stats["observed_y_statistic"], errors="coerce"
+                ).abs().median()
+                if "observed_y_statistic" in independent_stats
+                else None
+            )
+            mean_train_violation = (
+                pd.to_numeric(train_stats["prediction_violation"], errors="coerce").mean()
+                if "prediction_violation" in train_stats
+                else None
+            )
         else:
             median_fold_snr = median_fold_flip = window_snr = window_sign_flip = None
+            null_compatibility_rate = median_abs_observed_independence = None
             mean_train_violation = None
 
         mean_test_nmse = None
@@ -312,6 +401,10 @@ def summarize(root, output_dir, thresholds=None):
                 "n_constraints_min_per_fold": int(constraint_counts.min()) if len(constraint_counts) else 0,
                 "n_constraints_max_per_fold": int(constraint_counts.max()) if len(constraint_counts) else 0,
                 "n_unique_constraints": len(keys),
+                "n_independent_constraints": int(relation_counts.get("independent", 0)),
+                "n_dependent_constraints": int(relation_counts.get("dependent", 0)),
+                "observed_independence_tolerance_compatibility_rate": null_compatibility_rate,
+                "median_abs_observed_independence_statistic": median_abs_observed_independence,
                 "median_fold_abs_mean_over_sd": median_fold_snr,
                 "median_fold_sign_flip_rate": median_fold_flip,
                 "median_window_abs_mean_over_spread": window_snr,
@@ -329,16 +422,16 @@ def summarize(root, output_dir, thresholds=None):
     runs = pd.DataFrame(run_rows)
     stability = pd.DataFrame(stability_rows)
     if not stability.empty:
-        run_totals = runs.groupby(["dataset", "arm"])["run_dir"].nunique().rename("n_runs")
+        seed_totals = runs.groupby(["dataset", "arm"])["seed"].nunique().rename("n_seeds")
         support = (
-            stability.groupby(["dataset", "arm", "constraint_key"])["run_id"]
+            stability.groupby(["dataset", "arm", "constraint_key"])["seed"]
             .nunique()
-            .rename("n_runs_with_constraint")
+            .rename("n_seeds_with_constraint")
             .reset_index()
-            .join(run_totals, on=["dataset", "arm"])
+            .join(seed_totals, on=["dataset", "arm"])
         )
-        support["run_support_rate"] = support["n_runs_with_constraint"] / support["n_runs"]
-        stability = support.sort_values(["dataset", "arm", "run_support_rate"], ascending=[True, True, False])
+        support["seed_support_rate"] = support["n_seeds_with_constraint"] / support["n_seeds"]
+        stability = support.sort_values(["dataset", "arm", "seed_support_rate"], ascending=[True, True, False])
 
     output_dir.mkdir(parents=True, exist_ok=True)
     runs_path = output_dir / "ce_preaudit_run_summary.csv"
@@ -356,34 +449,77 @@ def summarize(root, output_dir, thresholds=None):
             values="mean_test_nmse",
             aggfunc="mean",
         ).reset_index()
-        if "dnn_only" in paired and "ce_active" in paired:
-            paired = paired.dropna(subset=["dnn_only", "ce_active"]).copy()
-            paired["delta_ce_minus_dnn_nmse"] = paired["ce_active"] - paired["dnn_only"]
-            paired["ce_lite_lower_nmse"] = paired["delta_ce_minus_dnn_nmse"] < 0
+        aggregates = []
+        for comparator, suffix in (("w_only", "w_only"), ("dnn_only", "dnn_only")):
+            if comparator not in paired or "ce_active" not in paired:
+                continue
+            delta_col = f"delta_ce_minus_{suffix}_nmse"
+            win_col = f"ce_lite_lower_nmse_vs_{suffix}"
+            paired[delta_col] = paired["ce_active"] - paired[comparator]
+            paired[win_col] = paired[delta_col] < 0
+            valid = paired.dropna(subset=[comparator, "ce_active"])
+            if valid.empty:
+                continue
             aggregate = (
-                paired.groupby("dataset")
+                valid.groupby("dataset")
                 .agg(
-                    n_paired_seeds=("seed", "nunique"),
-                    ce_lite_win_rate=("ce_lite_lower_nmse", "mean"),
-                    mean_delta_nmse=("delta_ce_minus_dnn_nmse", "mean"),
-                    median_delta_nmse=("delta_ce_minus_dnn_nmse", "median"),
+                    **{
+                        f"n_paired_seeds_vs_{suffix}": ("seed", "nunique"),
+                        f"ce_lite_win_rate_vs_{suffix}": (win_col, "mean"),
+                        f"mean_delta_nmse_vs_{suffix}": (delta_col, "mean"),
+                        f"median_delta_nmse_vs_{suffix}": (delta_col, "median"),
+                    }
                 )
                 .reset_index()
             )
+            aggregates.append(aggregate)
+        if aggregates:
+            aggregate = aggregates[0]
+            for other in aggregates[1:]:
+                aggregate = aggregate.merge(other, on="dataset", how="outer")
             paired = paired.merge(aggregate, on="dataset", how="left")
+            # Keep the legacy field names as aliases for the actual CE
+            # increment over W-only, never over a no-constraint baseline.
+            if "ce_lite_win_rate_vs_w_only" in paired:
+                paired["ce_lite_win_rate"] = paired["ce_lite_win_rate_vs_w_only"]
+                paired["n_paired_seeds"] = paired["n_paired_seeds_vs_w_only"]
     paired.to_csv(paired_path, index=False)
 
     thresholds = dict(DEFAULT_THRESHOLDS, **(thresholds or {}))
     gate = _apply_gate(runs, stability, paired, thresholds)
     gate_path = output_dir / "ce_preaudit_gate.csv"
     gate.to_csv(gate_path, index=False)
-    return runs_path, stability_path, paired_path, gate_path, len(runs)
+
+    coverage_rows = [
+        {
+            "experiment_prefix": experiment_prefix,
+            "n_config_dirs": coverage["included"]
+            + coverage["excluded_by_prefix"]
+            + coverage["missing_metrics"],
+            "n_included": coverage["included"],
+            "n_excluded_by_prefix": coverage["excluded_by_prefix"],
+            "n_missing_metrics": coverage["missing_metrics"],
+            "planned_runs": planned_runs,
+            "n_failed_or_timeout": (
+                planned_runs - coverage["included"] if planned_runs is not None else None
+            ),
+        }
+    ]
+    coverage_path = output_dir / "ce_preaudit_coverage.csv"
+    pd.DataFrame(coverage_rows).to_csv(coverage_path, index=False)
+    missing_path = output_dir / "ce_preaudit_missing_runs.csv"
+    pd.DataFrame(missing_metrics_rows).to_csv(missing_path, index=False)
+    return runs_path, stability_path, paired_path, gate_path, len(runs), coverage_path, missing_path
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, help="Root directory containing per-run Hydra output folders.")
     parser.add_argument("--output-dir", help="Defaults to --root.")
+    parser.add_argument(
+        "--experiment-prefix",
+        help="Only summarize runs whose composed config experiment name starts with this prefix.",
+    )
     parser.add_argument(
         "--min-constraints",
         type=int,
@@ -412,7 +548,7 @@ def main():
         "--min-win-rate",
         type=float,
         default=DEFAULT_THRESHOLDS["min_win_rate"],
-        help="Stage C: minimum paired CE-Lite win rate over DNN-only.",
+        help="Stage C: minimum paired CE-Lite win rate over W-only.",
     )
     parser.add_argument(
         "--min-paired-seeds",
@@ -425,9 +561,18 @@ def main():
         choices=("preaudit", "full"),
         default="full",
         help=(
-            "Which decision to headline: 'preaudit' uses stage A+B only "
-            "(constraint quality, run before the paired comparison); 'full' "
-            "also requires stage C (paired CE-Lite win rate)."
+            "Which decision to headline: 'preaudit' advances stable constraint "
+            "sets to a paired screen; 'full' also requires stage C (CE-Lite "
+            "improvement over W-only)."
+        ),
+    )
+    parser.add_argument(
+        "--planned-runs",
+        type=int,
+        default=None,
+        help=(
+            "Optional number of runs that were supposed to complete. When set, "
+            "the coverage table reports n_failed_or_timeout = planned - included."
         ),
     )
     args = parser.parse_args()
@@ -439,22 +584,36 @@ def main():
         "min_win_rate": args.min_win_rate,
         "min_paired_seeds": args.min_paired_seeds,
     }
-    runs_path, stability_path, paired_path, gate_path, n_runs = summarize(
-        args.root, args.output_dir, thresholds=thresholds
+    (
+        runs_path,
+        stability_path,
+        paired_path,
+        gate_path,
+        n_runs,
+        coverage_path,
+        missing_path,
+    ) = summarize(
+        args.root,
+        args.output_dir,
+        thresholds=thresholds,
+        experiment_prefix=args.experiment_prefix,
+        planned_runs=args.planned_runs,
     )
     print(f"Summarized {n_runs} run folders.")
     print(f"Run summary: {runs_path}")
     print(f"Constraint stability: {stability_path}")
-    print(f"Paired DNN-only vs W+CE-Lite: {paired_path}")
+    print(f"Paired W-only / DNN-only comparisons: {paired_path}")
     print(f"Three-stage Go/No-Go gate: {gate_path}")
+    print(f"Coverage / failure accounting: {coverage_path}")
+    print(f"Runs missing fold metrics: {missing_path}")
     print(
         "Gate thresholds: "
-        f"A: >= {thresholds['min_constraints']} constraints and "
+        f"A: >= {thresholds['min_constraints']} independent constraints and "
         f">= {thresholds['min_support_rate']:.0%} seed support; "
-        f"B: SNR >= {thresholds['min_window_snr']} and sign-flip <= "
-        f"{thresholds['max_sign_flip_rate']:.0%}; "
-        f"C: win rate >= {thresholds['min_win_rate']:.0%} over "
-        f">= {thresholds['min_paired_seeds']} paired seeds."
+        "B: directional-dependence diagnostics only (not applicable to "
+        "independence nulls); "
+        f"C: CE-Lite win rate >= {thresholds['min_win_rate']:.0%} over W-only "
+        f"with >= {thresholds['min_paired_seeds']} paired seeds."
     )
     try:
         gate = pd.read_csv(gate_path)

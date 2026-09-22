@@ -601,6 +601,9 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
                 y_audit,
                 fold=fold_idx,
                 stage="outer_test",
+                # Calibrate SE-based tolerances on the training fold only, so
+                # the held-out violation metric does not read held-out labels.
+                tolerance_reference=(X_train_audit, y_train_audit),
             )
             _, train_statistic_rows, _ = estimator.constraint_audit_rows(
                 X_train_audit,
