@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Phase 09: CE feasibility/stability pre-audit across synthetic, CoDiet and
-# Industry. This reports diagnostics; it does not automatically label a data
-# set Go/No-Go or select a winner from the same folds used for screening.
+# Industry. This runs a paired DNN-only vs W+CE-Lite screen and writes the
+# artifacts consumed by summarize_ce_preaudit.py, which then applies the
+# three-stage Go/No-Go screening gate (A: constraint count + cross-seed
+# support; B: cross-window/fold SNR + sign-flip; C: paired win rate).
+# The gate is a screening filter on the same folds, not a final verdict.
 
 SEEDS="${SEEDS:-42 43 44}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
@@ -109,4 +112,6 @@ echo
 echo "The run writes constraint_metadata.csv, constraint_stat_audit.csv, cv_fold_metrics.csv, and (when used) ci_window_filter_audit.csv per Hydra run."
 echo "After completion, summarize them with:"
 echo "  ${PYTHON_BIN} scripts/causal_predictor_plan/summarize_ce_preaudit.py --root <hydra-output-root>"
-echo "Review stability, HAC tolerances, constraint violations, and fold errors together; no single diagnostic is an automatic Go/No-Go gate."
+echo "This writes ce_preaudit_gate.csv with per-dataset stage A/B/C pass flags and a Go/No-Go decision."
+echo "Gate defaults: A >= 3 constraints and >= 60% cross-seed support; B SNR >= 2.0 and sign-flip <= 30%; C win rate >= 60% over >= 2 paired seeds."
+echo "Override any threshold via CLI (see --help). Stage C reuses the screening folds, so treat Go as a filter, not a final held-out verdict."

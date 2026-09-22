@@ -1,11 +1,36 @@
 #!/usr/bin/env python3
-"""Summarize CE pre-audit artifacts without applying automatic Go/No-Go gates."""
+"""Summarize CE pre-audit artifacts and emit a three-stage Go/No-Go gate.
+
+The gate mirrors the corrected pre-screening design: it decides only on
+constraint quality (A: how many d-separation constraints survive and how
+reliably they recur across seeds; B: how well the statistic is estimated
+across time windows/folds) plus a small paired screening comparison
+(C: DNN-only vs W+CE-Lite).  The violation-vs-test-error correlation is
+*not* part of the gate; it is reported as descriptive only because it is
+confounded by baseline fit quality, small fold counts, and wrong-DAG
+reverse causality.
+
+Stage C uses the same folds that produced the screening metrics, so the
+gate is a screening filter, not a final held-out verdict.  Thresholds are
+CLI-configurable; defaults follow the plan (>=3 constraints, >=60% seed
+support, SNR >= 2.0, sign-flip <= 30%, CE-Lite win rate >= 60%).
+"""
 
 import argparse
 from pathlib import Path
 
 import pandas as pd
 import yaml
+
+
+DEFAULT_THRESHOLDS = {
+    "min_constraints": 3,
+    "min_support_rate": 0.60,
+    "min_window_snr": 2.0,
+    "max_sign_flip_rate": 0.30,
+    "min_win_rate": 0.60,
+    "min_paired_seeds": 2,
+}
 
 
 def _read_yaml(path):
@@ -61,7 +86,131 @@ def _spearman(left, right):
     return float(pairs["left"].rank().corr(pairs["right"].rank()))
 
 
-def summarize(root, output_dir):
+def _arm_short(arm):
+    return str(arm).split(";")[0]
+
+
+def _median_or_none(series):
+    if series is None:
+        return None
+    values = pd.to_numeric(pd.Series(series), errors="coerce").dropna()
+    return float(values.median()) if len(values) else None
+
+
+def _apply_gate(runs, stability, paired, thresholds):
+    """Return one Go/No-Go screening row per dataset.
+
+    A: constraint quantity + cross-seed support.
+    B: cross-window (or cross-fold fallback) SNR + sign-flip rate.
+    C: paired DNN-only vs W+CE-Lite win rate over paired seeds.
+    """
+    if runs.empty:
+        return pd.DataFrame()
+
+    work = runs.copy()
+    work["arm_short"] = work["arm"].map(_arm_short)
+    ce_runs = work[work["arm_short"] == "ce_active"]
+    if ce_runs.empty:
+        ce_runs = work
+
+    stability_work = stability.copy()
+    if not stability_work.empty:
+        stability_work["arm_short"] = stability_work["arm"].map(_arm_short)
+        stability_ce = stability_work[stability_work["arm_short"] == "ce_active"]
+        if stability_ce.empty:
+            stability_ce = stability_work
+    else:
+        stability_ce = stability_work
+
+    paired_agg = {}
+    if isinstance(paired, pd.DataFrame) and not paired.empty and "dataset" in paired:
+        if "ce_lite_win_rate" in paired and "n_paired_seeds" in paired:
+            for _, row in paired.drop_duplicates("dataset").iterrows():
+                paired_agg[row["dataset"]] = (
+                    row.get("ce_lite_win_rate"),
+                    row.get("n_paired_seeds"),
+                )
+
+    gate_rows = []
+    for dataset in sorted(set(work["dataset"])):
+        dataset_runs = work[work["dataset"] == dataset]
+        dataset_ce_runs = ce_runs[ce_runs["dataset"] == dataset]
+
+        # Stage A: cross-seed constraint quantity and support.
+        if not stability_ce.empty:
+            keys = stability_ce[stability_ce["dataset"] == dataset]
+        else:
+            keys = stability_ce
+        n_union = int(keys["constraint_key"].nunique()) if not keys.empty else 0
+        if not keys.empty:
+            support = keys.drop_duplicates("constraint_key")["run_support_rate"]
+            support_fraction = float((support >= thresholds["min_support_rate"]).mean())
+        else:
+            support_fraction = 0.0
+        stage_a_pass = (
+            n_union >= thresholds["min_constraints"]
+            and support_fraction >= thresholds["min_support_rate"]
+        )
+
+        # Stage B: statistic estimability. Prefer explicit windows; fall back
+        # to cross-fold spread when windows are unavailable (e.g. HAC-only
+        # monthly data with too few rows for five >=100-row windows).
+        snr_window = _median_or_none(dataset_ce_runs.get("median_window_abs_mean_over_spread"))
+        flip_window = _median_or_none(dataset_ce_runs.get("median_window_sign_flip_rate_descriptive"))
+        if snr_window is not None:
+            snr_value, snr_source = snr_window, "window"
+        else:
+            snr_value, snr_source = _median_or_none(dataset_ce_runs.get("median_fold_abs_mean_over_sd")), "fold"
+        if flip_window is not None:
+            flip_value, flip_source = flip_window, "window"
+        else:
+            flip_value, flip_source = _median_or_none(dataset_ce_runs.get("median_fold_sign_flip_rate")), "fold"
+        snr_ok = snr_value is not None and snr_value >= thresholds["min_window_snr"]
+        flip_ok = flip_value is None or flip_value <= thresholds["max_sign_flip_rate"]
+        stage_b_pass = bool(snr_ok and flip_ok)
+
+        # Stage C: paired screening comparison.
+        win_rate, n_paired = paired_agg.get(dataset, (None, None))
+        win_rate = None if win_rate is None or pd.isna(win_rate) else float(win_rate)
+        n_paired = None if n_paired is None or pd.isna(n_paired) else int(n_paired)
+        stage_c_pass = (
+            win_rate is not None
+            and n_paired is not None
+            and n_paired >= thresholds["min_paired_seeds"]
+            and win_rate >= thresholds["min_win_rate"]
+        )
+
+        reasons = []
+        if not stage_a_pass:
+            reasons.append("A:constraints/support")
+        if not stage_b_pass:
+            reasons.append("B:snr/sign_flip")
+        if not stage_c_pass:
+            reasons.append("C:paired_win_rate")
+        gate_rows.append(
+            {
+                "dataset": dataset,
+                "n_runs": int(dataset_runs["run_dir"].nunique()),
+                "n_ce_runs": int(dataset_ce_runs["run_dir"].nunique()) if not dataset_ce_runs.empty else 0,
+                "stage_a_n_constraints_union": n_union,
+                "stage_a_support_fraction": support_fraction,
+                "stage_a_pass": bool(stage_a_pass),
+                "stage_b_snr": snr_value,
+                "stage_b_snr_source": snr_source,
+                "stage_b_sign_flip_rate": flip_value,
+                "stage_b_sign_flip_source": flip_source,
+                "stage_b_pass": bool(stage_b_pass),
+                "stage_c_win_rate": win_rate,
+                "stage_c_n_paired_seeds": n_paired,
+                "stage_c_pass": bool(stage_c_pass),
+                "decision": "Go" if (stage_a_pass and stage_b_pass and stage_c_pass) else "No-Go",
+                "failed_stages": ";".join(reasons) if reasons else "none",
+            }
+        )
+    return pd.DataFrame(gate_rows)
+
+
+def summarize(root, output_dir, thresholds=None):
     root = Path(root).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve() if output_dir else root
     run_rows = []
@@ -193,6 +342,7 @@ def summarize(root, output_dir):
     runs.to_csv(runs_path, index=False)
     stability.to_csv(stability_path, index=False)
     paired_path = output_dir / "ce_preaudit_paired_comparison.csv"
+    paired = pd.DataFrame()
     if not runs.empty:
         paired_input = runs.copy()
         paired_input["arm_short"] = paired_input["arm"].str.split(";").str[0]
@@ -217,23 +367,85 @@ def summarize(root, output_dir):
                 .reset_index()
             )
             paired = paired.merge(aggregate, on="dataset", how="left")
-        paired.to_csv(paired_path, index=False)
-    else:
-        pd.DataFrame().to_csv(paired_path, index=False)
-    return runs_path, stability_path, paired_path, len(runs)
+    paired.to_csv(paired_path, index=False)
+
+    thresholds = dict(DEFAULT_THRESHOLDS, **(thresholds or {}))
+    gate = _apply_gate(runs, stability, paired, thresholds)
+    gate_path = output_dir / "ce_preaudit_gate.csv"
+    gate.to_csv(gate_path, index=False)
+    return runs_path, stability_path, paired_path, gate_path, len(runs)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, help="Root directory containing per-run Hydra output folders.")
     parser.add_argument("--output-dir", help="Defaults to --root.")
+    parser.add_argument(
+        "--min-constraints",
+        type=int,
+        default=DEFAULT_THRESHOLDS["min_constraints"],
+        help="Stage A: minimum d-separation constraints in the cross-seed union.",
+    )
+    parser.add_argument(
+        "--min-support-rate",
+        type=float,
+        default=DEFAULT_THRESHOLDS["min_support_rate"],
+        help="Stage A: minimum fraction of constraints recurring across seeds.",
+    )
+    parser.add_argument(
+        "--min-window-snr",
+        type=float,
+        default=DEFAULT_THRESHOLDS["min_window_snr"],
+        help="Stage B: minimum |mean|/spread (window, else fold).",
+    )
+    parser.add_argument(
+        "--max-sign-flip-rate",
+        type=float,
+        default=DEFAULT_THRESHOLDS["max_sign_flip_rate"],
+        help="Stage B: maximum cross-window (else fold) sign-flip rate.",
+    )
+    parser.add_argument(
+        "--min-win-rate",
+        type=float,
+        default=DEFAULT_THRESHOLDS["min_win_rate"],
+        help="Stage C: minimum paired CE-Lite win rate over DNN-only.",
+    )
+    parser.add_argument(
+        "--min-paired-seeds",
+        type=int,
+        default=DEFAULT_THRESHOLDS["min_paired_seeds"],
+        help="Stage C: minimum paired seeds before the win rate is trusted.",
+    )
     args = parser.parse_args()
-    runs_path, stability_path, paired_path, n_runs = summarize(args.root, args.output_dir)
+    thresholds = {
+        "min_constraints": args.min_constraints,
+        "min_support_rate": args.min_support_rate,
+        "min_window_snr": args.min_window_snr,
+        "max_sign_flip_rate": args.max_sign_flip_rate,
+        "min_win_rate": args.min_win_rate,
+        "min_paired_seeds": args.min_paired_seeds,
+    }
+    runs_path, stability_path, paired_path, gate_path, n_runs = summarize(
+        args.root, args.output_dir, thresholds=thresholds
+    )
     print(f"Summarized {n_runs} run folders.")
     print(f"Run summary: {runs_path}")
     print(f"Constraint stability: {stability_path}")
     print(f"Paired DNN-only vs W+CE-Lite: {paired_path}")
-    print("All SNR/correlation values are descriptive; this script applies no Go/No-Go thresholds.")
+    print(f"Three-stage Go/No-Go gate: {gate_path}")
+    print(
+        "Gate thresholds: "
+        f"A: >= {thresholds['min_constraints']} constraints and "
+        f">= {thresholds['min_support_rate']:.0%} seed support; "
+        f"B: SNR >= {thresholds['min_window_snr']} and sign-flip <= "
+        f"{thresholds['max_sign_flip_rate']:.0%}; "
+        f"C: win rate >= {thresholds['min_win_rate']:.0%} over "
+        f">= {thresholds['min_paired_seeds']} paired seeds."
+    )
+    print(
+        "The gate is a screening filter on the same folds; it is not a final "
+        "held-out verdict. Violation-vs-error correlations remain descriptive."
+    )
 
 
 if __name__ == "__main__":
