@@ -12,6 +12,13 @@
 #   - ce_residualize_method (linear|quantile)
 #   - ce_se_method (window|hac) + ce_tolerance_sd_multiplier
 #   - cross-window sign-flip constraint pruning
+#
+# Arms E0..E3 run the Gaussian linear SEM.  Arms E4..E6 repeat the CE screen on
+# the nonlinear SEM (++problem.sem_type=nonlinear) as a misspecification stress
+# test; set INCLUDE_NONLINEAR=0 to skip them.  The nonlinear conditional mean is
+# not described by the linear synthetic oracle or the raw-SEM W moment, so the
+# oracle is disabled for those arms and E6's W term is a deliberately
+# misspecified control.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
@@ -147,5 +154,33 @@ run_phase1_synthetic_ce_new "e3_w_plus_ce_upgraded" \
   "${COMMON[@]}" \
   "${CE_COMMON[@]}" \
   "solver.use_w_constraints=true"
+
+# Nonlinear ER stress test (INCLUDE_NONLINEAR=0 to skip).  The partial-
+# correlation CE statistic assumes a linear conditional mean, so these arms
+# measure graceful degradation, not correctness.  The synthetic linear oracle
+# and the raw-SEM W moment do not describe the nonlinear mean, so the oracle is
+# disabled and the E6 W term is read as a misspecified control.
+if [[ "${INCLUDE_NONLINEAR:-1}" == "1" ]]; then
+  run_phase1_synthetic_ce_new "e4_nonlinear_pure_ce" \
+    "${COMMON[@]}" \
+    "${CE_COMMON[@]}" \
+    "++problem.sem_type=nonlinear" \
+    "solver.use_w_constraints=false" \
+    "solver.constraint_audit_oracle=none"
+
+  run_phase1_synthetic_ce_new "e5_nonlinear_quantile_ce" \
+    "${COMMON[@]}" \
+    "${CE_COMMON[@]}" \
+    "++problem.sem_type=nonlinear" \
+    "solver.ce_residualize_method=quantile" \
+    "solver.use_w_constraints=false" \
+    "solver.constraint_audit_oracle=none"
+
+  run_phase1_synthetic_ce_new "e6_nonlinear_w_plus_ce" \
+    "${COMMON[@]}" \
+    "${CE_COMMON[@]}" \
+    "++problem.sem_type=nonlinear" \
+    "solver.constraint_audit_oracle=none"
+fi
 
 echo "=== CE-NEW-ER complete ==="
