@@ -13,12 +13,12 @@
 #   - ce_se_method (window|hac) + ce_tolerance_sd_multiplier
 #   - cross-window sign-flip constraint pruning
 #
-# Arms E0..E3 run the Gaussian linear SEM.  Arms E4..E6 repeat the CE screen on
+# Arms E0..E3 run the Gaussian linear SEM.  Arms E4..E7 repeat the CE screen on
 # the nonlinear SEM (++problem.sem_type=nonlinear) as a misspecification stress
 # test; set INCLUDE_NONLINEAR=0 to skip them.  The nonlinear conditional mean is
 # not described by the linear synthetic oracle or the raw-SEM W moment, so the
 # oracle is disabled for those arms and E6's W term is a deliberately
-# misspecified control.
+# misspecified control.  E7 is the nonlinear no-constraint reference.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
@@ -180,6 +180,18 @@ if [[ "${INCLUDE_NONLINEAR:-1}" == "1" ]]; then
     "${COMMON[@]}" \
     "${CE_COMMON[@]}" \
     "++problem.sem_type=nonlinear" \
+    "solver.use_w_constraints=true" \
+    "solver.constraint_audit_oracle=none"
+
+  # E7: nonlinear no-constraint reference.  Without it the nonlinear CE arms
+  # cannot be separated from the harder nonlinear target itself.
+  run_phase1_synthetic_ce_new "e7_nonlinear_no_constraint" \
+    "${COMMON[@]}" \
+    "++problem.sem_type=nonlinear" \
+    "solver.constrained=false" \
+    "solver.recalculate_dag=false" \
+    "solver.use_w_constraints=false" \
+    "solver.use_ci_penalty=false" \
     "solver.constraint_audit_oracle=none"
 fi
 
