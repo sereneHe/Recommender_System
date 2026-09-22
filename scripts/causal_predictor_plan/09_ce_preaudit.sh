@@ -12,6 +12,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 announce_stage "09" "CE constraint pre-audit"
 
 DATASET_SCOPE="${DATASET_SCOPE:-all}"
+DATASET_GROUPS="${DATASET_GROUPS:-synthetic codiet industry}"
 TIME_LIMIT="${TIME_LIMIT:-120}"
 N_RUNS="${N_RUNS:-5}"
 N_OUTER="${N_OUTER:-10}"
@@ -96,17 +97,25 @@ fi
 # Synthetic and CoDiet use shuffled/stratified folds. CoDiet is deliberately
 # audited with its discrete-CMI statistic; continuous partial correlation is
 # not treated as valid for its mixed categorical/continuous variables.
-run_preaudit_group "synthetic" "${SYNTH_PROBLEMS}" "site_gender" \
-  "conditional_expectation" "standard_error"
-run_preaudit_group "codiet" "${CODIET_PROBLEMS}" "site_gender" \
-  "discrete_conditional_independence" "fixed"
+# DATASET_GROUPS selects which dataset families this invocation runs
+# (default: all).  Do not name it GROUPS: that is a readonly bash builtin.
+if [[ " ${DATASET_GROUPS} " == *" synthetic "* ]]; then
+  run_preaudit_group "synthetic" "${SYNTH_PROBLEMS}" "site_gender" \
+    "conditional_expectation" "standard_error"
+fi
+if [[ " ${DATASET_GROUPS} " == *" codiet "* ]]; then
+  run_preaudit_group "codiet" "${CODIET_PROBLEMS}" "site_gender" \
+    "discrete_conditional_independence" "fixed"
+fi
 
 # Industry uses expanding-window validation; ce_se_method=auto therefore
 # resolves to Newey-West HAC, not the iid partial-correlation approximation.
-run_preaudit_group "industry" "${INDUSTRY_PROBLEMS}" "time_series" \
-  "conditional_expectation" "standard_error" \
-  "solver.cv_time_test_size=${CV_TIME_TEST_SIZE:-12}" \
-  "solver.cv_time_gap=${CV_TIME_GAP:-0}"
+if [[ " ${DATASET_GROUPS} " == *" industry "* ]]; then
+  run_preaudit_group "industry" "${INDUSTRY_PROBLEMS}" "time_series" \
+    "conditional_expectation" "standard_error" \
+    "solver.cv_time_test_size=${CV_TIME_TEST_SIZE:-12}" \
+    "solver.cv_time_gap=${CV_TIME_GAP:-0}"
+fi
 
 echo
 echo "The run writes constraint_metadata.csv, constraint_stat_audit.csv, cv_fold_metrics.csv, and (when used) ci_window_filter_audit.csv per Hydra run."
