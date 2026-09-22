@@ -2,23 +2,28 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.nn import MSELoss
 import logging
 from hc_predictor_ce import (
+    birth_death_constraint_sampling_enabled,
     ce_constraint_backend,
     conditional_covariance_mean,
+    dependent_statistic_values,
     dependent_expectation_violations,
     dependent_expectation_inequalities,
     ensure_humancompatible_pbm_compatible,
+    filter_unstable_signed_dependence_constraints,
+    independent_expectation_equalities,
     independent_expectation_inequalities,
     is_expectation_constraint_mode,
     hard_discrete_conditional_mutual_information,
     make_expectation_pbm,
     make_ce_minibatch_loader,
+    sample_posterior_stable_constraints,
     signed_expectation_equalities,
     split_expectation_constraints,
 )
 from hc_predictor_ci import apply_ci_penalty, conditional_correlation_value
+from nn_lagrangian import make_regression_loss
 
 try:
     from humancompatible.train.dual_optim import ALM, MoreauEnvelope
@@ -238,7 +243,28 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
     )
 
-    ci_constraints = _build_ci_constraints_from_cfg(cfg, W)
+    graph_target = y if y.ndim == 2 else y.unsqueeze(1)
+    graph_data = torch.cat([X, graph_target], dim=1)
+    ci_constraints, birth_death_diagnostics = _build_ci_constraints_from_cfg(
+        cfg,
+        W,
+        graph_data=graph_data,
+        return_diagnostics=True,
+    )
+    ci_constraints, window_filter_diagnostics = filter_unstable_signed_dependence_constraints(
+        X, y, ci_constraints, cfg=cfg
+    )
+    # Persist the exact resolved set on the fitted network.  The outer-CV
+    # caller writes it as an artifact and evaluates it only on held-out rows.
+    # Keeping this on the model avoids rebuilding constraints from a different
+    # graph or a differently mutated Hydra config during reporting.
+    model.ci_constraints_ = [dict(spec) for spec in ci_constraints]
+    model.ci_window_filter_diagnostics_ = [dict(row) for row in window_filter_diagnostics]
+    model.ci_variable_names_ = _ci_variable_names(cfg, W.shape[0])
+    model.ci_penalty_kind_ = str(getattr(cfg, "ci_penalty_kind", "conditional_expectation"))
+    model.ci_dependent_statistic_ = str(
+        getattr(cfg, "ci_dependent_statistic", "signed")
+    )
     use_expectation_constraints = is_expectation_constraint_mode(cfg)
     use_w_constraints = bool(getattr(cfg, "use_w_constraints", getattr(cfg, "constrained", True)))
     ce_independent_constraints = []
@@ -265,6 +291,8 @@ def _fit_aug_lagrangian_nn_constraint_impl(
     elif ce_backend == "pbm_all":
         n_ce_pbm_constraints += len(ce_independent_constraints) + len(ce_dependent_constraints)
     n_w_constraints = d + 1 if use_w_constraints else 0
+    model.w_constraint_enabled_ = use_w_constraints
+    model.w_constraint_matrix_ = W.detach().cpu().numpy().copy()
 
     dual_opt = ALM(
         m=n_w_constraints + n_ce_alm_constraints,
@@ -295,14 +323,24 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         if use_w_constraints:
             raise ValueError("Constraint does not depend on predictions.")
     if use_w_constraints:
-        logging.info(f"Sanity check: GT constraint = {W_constraint(v, g0, y)}")
+        logging.info(
+            "W mean-moment diagnostic on model-standardized training data: %s",
+            W_constraint(v, g0, y),
+        )
     else:
         logging.info("W/DAG constraints disabled by use_w_constraints=false.")
     if bool(getattr(cfg, "ci_log_constraints", True)):
         log_active_gurobi_edges(cfg, W)
-        log_active_ci_constraints(cfg, W, X, y, stage="Initial")
+        log_active_ci_constraints(
+            cfg,
+            W,
+            X,
+            y,
+            stage="Initial",
+            ci_constraints=ci_constraints,
+        )
 
-    loss = MSELoss()
+    loss = make_regression_loss(cfg)
     best_val_loss = float("inf")
     best_state_dict = None
     best_outer = None
@@ -350,11 +388,13 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                     g0_batch = M[:, :-1] @ X_batch.mean(dim=0)
                     g_parts.append(W_constraint(v, g0_batch, yhat))
                 if ce_backend in {"alm_pbm", "alm_all"} and ce_independent_constraints:
-                    ce_eq = signed_expectation_equalities(
+                    ce_eq = independent_expectation_equalities(
                         X_batch,
                         yhat,
                         ce_independent_constraints,
                         cfg=cfg,
+                        se_X=X,
+                        se_y=y,
                     )
                     g_parts.append(ce_eq)
                 if ce_backend == "alm_all" and ce_dependent_constraints:
@@ -377,6 +417,8 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                                 ce_independent_constraints,
                                 tolerance=float(getattr(cfg, "ce_independence_tolerance", 0.0)),
                                 cfg=cfg,
+                                se_X=X,
+                                se_y=y,
                             )
                         )
                     if ce_backend in {"alm_pbm", "pbm_all"} and ce_dependent_constraints:
@@ -406,6 +448,8 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                                 ce_independent_constraints,
                                 tolerance=float(getattr(cfg, "ce_independence_tolerance", 0.0)),
                                 cfg=cfg,
+                                se_X=X,
+                                se_y=y,
                             )
                         )
                     if ce_backend in {"alm_pbm", "pbm_all"} and ce_dependent_constraints:
@@ -497,11 +541,40 @@ def _fit_aug_lagrangian_nn_constraint_impl(
     model.best_validation_loss_ = best_val_loss if best_state_dict is not None else None
     model.best_validation_outer_ = best_outer
     model.restore_best_validation_model_ = restore_best_validation_model
+    w_array = W.detach().cpu().numpy() if isinstance(W, torch.Tensor) else np.asarray(W)
+    edge_threshold = float(
+        getattr(cfg, "nonzero_threshold", getattr(cfg, "ci_threshold", 1e-8))
+    )
+    active_w_edges = int(
+        np.sum(np.abs(w_array) > edge_threshold) - np.sum(
+            np.abs(np.diag(w_array)) > edge_threshold
+        )
+    )
+    model.constraint_counts_ = {
+        "backend": ce_backend,
+        "independent_constraints": len(ce_independent_constraints),
+        "dependent_constraints": len(ce_dependent_constraints),
+        "alm_constraints": n_ce_alm_constraints,
+        "pbm_constraints": n_ce_pbm_constraints,
+        "w_constraints": n_w_constraints,
+        "active_w_edges": active_w_edges,
+        "total_constraints": n_w_constraints
+        + len(ce_independent_constraints)
+        + len(ce_dependent_constraints),
+    }
+    model.birth_death_diagnostics_ = birth_death_diagnostics
 
     if bool(getattr(cfg, "ci_log_constraints", True)):
         with torch.no_grad():
             final_yhat = model(X)
-        log_active_ci_constraints(cfg, W, X, final_yhat, stage="Final")
+        log_active_ci_constraints(
+            cfg,
+            W,
+            X,
+            final_yhat,
+            stage="Final",
+            ci_constraints=ci_constraints,
+        )
 
     return model, lam
 
@@ -555,7 +628,7 @@ def _ci_variable_names(cfg, n_vars):
     return names[:n_vars]
 
 
-def _build_ci_constraints_from_cfg(cfg, W):
+def _build_ci_constraints_from_adjacency(cfg, W):
     use_ci_penalty = getattr(cfg, "use_ci_penalty", False)
     if not use_ci_penalty:
         return []
@@ -563,6 +636,9 @@ def _build_ci_constraints_from_cfg(cfg, W):
     current_feature_names = list(getattr(cfg, "current_feature_names", []) or [])
     current_target_name = getattr(cfg, "current_target_name", None)
     ci_dependent_margin = float(getattr(cfg, "ci_dependent_margin", 0.05))
+    add_collider_conditional_dependence = bool(
+        getattr(cfg, "ci_add_collider_conditional_dependence", True)
+    )
     if bool(getattr(cfg, "ci_use_shielded_collider_limits", False)):
         shielded_margin_cfg = getattr(cfg, "ci_shielded_dependent_margin", None)
         shielded_dependent_margin = (
@@ -594,6 +670,7 @@ def _build_ci_constraints_from_cfg(cfg, W):
                     skip_if_direct_edge=bool(getattr(cfg, "ci_skip_if_direct_edge", True)),
                     dependent_margin=ci_dependent_margin,
                     add_dsep_independence=bool(getattr(cfg, "ci_add_dsep_independence", True)),
+                    add_collider_conditional_dependence=add_collider_conditional_dependence,
                     add_shielded_collider_dependence=bool(
                         getattr(cfg, "ci_add_shielded_collider_dependence", False)
                     ),
@@ -607,15 +684,27 @@ def _build_ci_constraints_from_cfg(cfg, W):
                     current_feature_names=current_feature_names,
                     current_target_name=current_target_name,
                     max_dsep_separator_size=getattr(cfg, "ci_max_dsep_separator_size", None),
+                    all_dsep_separators=bool(
+                        getattr(cfg, "ci_dsep_all_separators", False)
+                    ),
                 )
             )
     elif ci_mode == "collider_pairs":
-        ci_constraints = collider_constraint_pairs_from_adjacency(
+        collider_pairs = collider_constraint_pairs_from_adjacency(
             W,
             threshold=float(getattr(cfg, "ci_threshold", 1e-8)),
             skip_if_direct_edge=bool(getattr(cfg, "ci_skip_if_direct_edge", True)),
             dependent_margin=ci_dependent_margin,
         )
+        ci_constraints = []
+        if bool(getattr(cfg, "ci_add_collider_marginal_independence", True)):
+            ci_constraints.extend(
+                [pair for pair in collider_pairs if pair.get("mode") == "marginal_independent"]
+            )
+        if add_collider_conditional_dependence:
+            ci_constraints.extend(
+                [pair for pair in collider_pairs if pair.get("mode") == "conditional_dependent"]
+            )
         if bool(getattr(cfg, "ci_add_shielded_collider_dependence", False)):
             ci_constraints.extend(
                 shielded_collider_dependence_constraints_from_adjacency(
@@ -637,6 +726,7 @@ def _build_ci_constraints_from_cfg(cfg, W):
             skip_if_direct_edge=bool(getattr(cfg, "ci_skip_if_direct_edge", True)),
             dependent_margin=ci_dependent_margin,
             add_dsep_independence=bool(getattr(cfg, "ci_add_dsep_independence", True)),
+            add_collider_conditional_dependence=add_collider_conditional_dependence,
             add_shielded_collider_dependence=bool(
                 getattr(cfg, "ci_add_shielded_collider_dependence", False)
             ),
@@ -650,6 +740,7 @@ def _build_ci_constraints_from_cfg(cfg, W):
             current_feature_names=current_feature_names,
             current_target_name=current_target_name,
             max_dsep_separator_size=getattr(cfg, "ci_max_dsep_separator_size", None),
+            all_dsep_separators=bool(getattr(cfg, "ci_dsep_all_separators", False)),
         )
     else:
         raise ValueError(
@@ -657,13 +748,109 @@ def _build_ci_constraints_from_cfg(cfg, W):
             "Expected one of {'manual', 'collider_pairs', 'conservative'}."
         )
 
-    return _dedupe_indexed_ci_constraints(
-        _resolve_named_ci_constraints(
-            ci_constraints,
-            getattr(cfg, "current_feature_names", []),
-            getattr(cfg, "current_target_name", None),
-        )
+    resolved_constraints = _resolve_named_ci_constraints(
+        ci_constraints,
+        getattr(cfg, "current_feature_names", []),
+        getattr(cfg, "current_target_name", None),
     )
+
+    # Optional experiment control: retain constraints that involve the
+    # prediction target.  ``endpoint`` is the safe option for a predictor
+    # audit: the target must be X or Y in T(X_i, Y | Z), never merely part of
+    # Z/a collider.  ``any`` preserves the historical behavior.
+    if bool(getattr(cfg, "ci_target_related_only", False)):
+        target_role = str(getattr(cfg, "ci_target_constraint_role", "any")).strip().lower()
+        if target_role not in {"any", "endpoint"}:
+            raise ValueError(
+                "ci_target_constraint_role must be 'any' or 'endpoint', "
+                f"got {target_role!r}."
+            )
+        target_index = len(list(getattr(cfg, "current_feature_names", []) or []))
+        target_related = []
+        for spec in resolved_constraints:
+            endpoints = {
+                int(spec.get("x_index", -1)),
+                int(spec.get("y_index", -1)),
+            }
+            if target_role == "endpoint":
+                if target_index in endpoints:
+                    target_related.append(spec)
+                continue
+            indices = {
+                *endpoints,
+                *(int(index) for index in spec.get("z_indices", []) or []),
+            }
+            collider_index = spec.get("collider_index")
+            if collider_index is not None:
+                indices.add(int(collider_index))
+            if target_index in indices:
+                target_related.append(spec)
+        resolved_constraints = target_related
+
+    resolved_constraints = _dedupe_indexed_ci_constraints(resolved_constraints)
+    if bool(getattr(cfg, "ci_prune_redundant", False)):
+        before = len(resolved_constraints)
+        resolved_constraints = _prune_redundant_independence_constraints(
+            resolved_constraints
+        )
+        logging.info(
+            "CI subset-pruning enabled: before=%d after=%d removed=%d",
+            before,
+            len(resolved_constraints),
+            before - len(resolved_constraints),
+        )
+
+    return resolved_constraints
+
+
+def _build_ci_constraints_from_cfg(
+    cfg,
+    W,
+    graph_data=None,
+    return_diagnostics=False,
+):
+    """Build CI constraints from one DAG or an opt-in DAG posterior.
+
+    ``HC_CE_BD_MCMC=1`` activates birth-death/reversal sampling.  With the
+    switch absent, this wrapper is intentionally identical to the historical
+    single-thresholded-W path.
+    """
+
+    if not birth_death_constraint_sampling_enabled():
+        constraints = _build_ci_constraints_from_adjacency(cfg, W)
+        result = (constraints, None)
+        return result if return_diagnostics else constraints
+
+    if graph_data is None:
+        logging.warning(
+            "HC_CE_BD_MCMC is enabled but graph_data was not supplied; "
+            "falling back to the single-DAG constraint set for this call."
+        )
+        constraints = _build_ci_constraints_from_adjacency(cfg, W)
+        diagnostics = {
+            "enabled": True,
+            "fallback": "missing_graph_data",
+        }
+        result = (constraints, diagnostics)
+        return result if return_diagnostics else constraints
+
+    constraints, diagnostics = sample_posterior_stable_constraints(
+        W,
+        graph_data,
+        lambda adjacency: _build_ci_constraints_from_adjacency(cfg, adjacency),
+        initial_edge_threshold=float(getattr(cfg, "ci_threshold", 0.1)),
+    )
+    logging.info(
+        "Birth-death DAG constraint sampling: graphs=%d, candidates=%d, "
+        "retained=%d (independent=%d, dependent=%d)",
+        diagnostics["unique_post_burn_in_graphs"],
+        diagnostics["candidate_constraint_keys"],
+        diagnostics["retained_constraints"],
+        diagnostics["retained_independence_constraints"],
+        diagnostics["retained_dependence_constraints"],
+    )
+    result = (constraints, diagnostics)
+    return result if return_diagnostics else constraints
 
 
 def _is_discrete_ci_kind(penalty_kind):
@@ -700,7 +887,7 @@ def _ci_constraint_penalty_values(X, y, ci_constraints, penalty_kind, eps=1e-8, 
             if relation == "independent":
                 value = cond_cov_mean
             elif relation == "dependent":
-                value = margin - cond_cov_mean
+                value = margin - dependent_statistic_values(cond_cov_mean, cfg=cfg)
             else:
                 raise ValueError(f"Unknown CI constraint type: {relation!r}.")
         elif _is_discrete_ci_kind(penalty_kind):
@@ -764,13 +951,14 @@ def log_active_gurobi_edges(cfg, W):
         logging.info("  Gurobi edge: %s -> %s weight=%+.6g", src_name, dst_name, weight)
 
 
-def log_active_ci_constraints(cfg, W, X, y, stage):
+def log_active_ci_constraints(cfg, W, X, y, stage, ci_constraints=None):
     if not bool(getattr(cfg, "use_ci_penalty", False)):
         return
     if not bool(getattr(cfg, "ci_log_constraints", True)):
         return
 
-    ci_constraints = _build_ci_constraints_from_cfg(cfg, W)
+    if ci_constraints is None:
+        ci_constraints = _build_ci_constraints_from_cfg(cfg, W)
     penalty_kind = str(getattr(cfg, "ci_penalty_kind", "conditional_expectation"))
     eps = float(getattr(cfg, "ci_eps", 1e-8))
     names = _ci_variable_names(cfg, W.shape[0])
@@ -809,7 +997,8 @@ def log_active_ci_constraints(cfg, W, X, y, stage):
         collider_name = names[collider_idx] if collider_idx is not None and collider_idx < len(names) else None
         z_text = ", ".join(z_names) if z_names else "<empty>"
         logging.info(
-            "  CI constraint %02d: relation=%s mode=%s source=%s x=%s y=%s z=[%s] collider=%s penalty=%+.6g",
+            "  CI constraint %02d: relation=%s mode=%s source=%s x=%s y=%s "
+            "z=[%s] collider=%s support=%s opposing=%s penalty=%+.6g",
             idx,
             spec.get("type", "independent"),
             spec.get("mode", "manual"),
@@ -818,6 +1007,8 @@ def log_active_ci_constraints(cfg, W, X, y, stage):
             y_name,
             z_text,
             collider_name,
+            spec.get("posterior_support", "n/a"),
+            spec.get("opposing_support", "n/a"),
             value,
         )
 
@@ -1087,17 +1278,65 @@ def _dedupe_indexed_ci_constraints(constraints):
     return deduped
 
 
+def _prune_redundant_independence_constraints(constraints):
+    """Keep only minimal conditioning sets for an endpoint pair.
+
+    This is an optional stability heuristic for estimated-DAG screens.  It is
+    deliberately not enabled by default: in general, conditional
+    independence is not monotone in the conditioning set, so dropping
+    ``X _||_ Y | C,D`` merely because ``X _||_ Y | C`` exists is not a
+    theorem.  The phase-1 arm records this as a pruning ablation, not as a
+    logically equivalent replacement for the full constraint pool.
+    """
+    if not constraints:
+        return []
+
+    grouped = {}
+    passthrough = []
+    for spec in constraints:
+        relation = spec.get("type", "independent")
+        mode = spec.get("mode", "")
+        if relation != "independent" or mode != "d_separated_independent":
+            passthrough.append(spec)
+            continue
+        pair = tuple(sorted((int(spec["x_index"]), int(spec["y_index"]))))
+        grouped.setdefault(pair, []).append(spec)
+
+    retained = list(passthrough)
+    for specs in grouped.values():
+        ordered = sorted(
+            specs,
+            key=lambda item: (
+                len(item.get("z_indices", []) or []),
+                tuple(sorted(int(z) for z in item.get("z_indices", []) or [])),
+            ),
+        )
+        minimal_sets = []
+        for spec in ordered:
+            z_set = set(int(z) for z in spec.get("z_indices", []) or [])
+            if any(previous <= z_set for previous in minimal_sets):
+                continue
+            minimal_sets.append(z_set)
+            retained.append(spec)
+
+    return _dedupe_indexed_ci_constraints(retained)
+
+
 def d_separated_independence_constraints_from_adjacency(
     W,
     threshold=1e-8,
     skip_if_direct_edge=True,
     max_separator_size=None,
+    all_separators=False,
 ):
     """
     Add independent penalties for pairs that are d-separated in the learned DAG.
 
-    For each unordered pair (x, y), we ask NetworkX for one minimal
-    d-separator Z. If it exists, we add x independent y | Z.
+    For each unordered pair (x, y), the default asks NetworkX for one minimal
+    d-separator Z.  The opt-in ``all_separators`` mode enumerates every
+    conditioning set up to ``max_separator_size``; it exists only for the
+    Phase-1 pruning ablation and should not be enabled for high-dimensional
+    real data.
     """
     import networkx as nx
     from networkx.algorithms.d_separation import find_minimal_d_separator, is_d_separator
@@ -1127,6 +1366,32 @@ def d_separated_independence_constraints_from_adjacency(
             if skip_if_direct_edge and (
                 abs(W_np[x, y]) > threshold or abs(W_np[y, x]) > threshold
             ):
+                continue
+
+            candidate_nodes = sorted(restricted_nodes - {x, y})
+            if all_separators:
+                if max_separator_size is None:
+                    raise ValueError(
+                        "all_separators requires max_separator_size to bound the candidate pool"
+                    )
+                from itertools import combinations
+
+                max_size = min(int(max_separator_size), len(candidate_nodes))
+                for size in range(max_size + 1):
+                    for combination in combinations(candidate_nodes, size):
+                        z_indices = list(combination)
+                        if not is_d_separator(graph, x, y, set(z_indices)):
+                            continue
+                        constraints.append(
+                            {
+                                "x_index": x,
+                                "y_index": y,
+                                "z_indices": z_indices,
+                                "type": "independent",
+                                "source": "d_separation",
+                                "mode": "d_separated_independent",
+                            }
+                        )
                 continue
 
             try:
@@ -1170,6 +1435,7 @@ def conservative_ci_constraints_from_adjacency(
     skip_if_direct_edge=True,
     dependent_margin=0.05,
     add_dsep_independence=True,
+    add_collider_conditional_dependence=True,
     add_shielded_collider_dependence=False,
     add_collider_marginal_independence=False,
     shielded_dependent_margin=0.05,
@@ -1179,16 +1445,17 @@ def conservative_ci_constraints_from_adjacency(
     current_feature_names=None,
     current_target_name=None,
     max_dsep_separator_size=None,
+    all_dsep_separators=False,
 ):
     """
     Conservative CI strategy:
       1. Keep user/default independence constraints.
       2. Add independence constraints for d-separated pairs in W.
-      3. Add dependence constraints only for detected collider-open cases.
+      3. Optionally add dependence constraints for detected collider-open cases.
 
     This matches the recommended policy:
       - enforce d-separation as independence
-      - only add dependence for colliders
+      - only add dependence for colliders when explicitly enabled
     """
     constraints = []
 
@@ -1204,6 +1471,7 @@ def conservative_ci_constraints_from_adjacency(
                 threshold=threshold,
                 skip_if_direct_edge=skip_if_direct_edge,
                 max_separator_size=max_dsep_separator_size,
+                all_separators=bool(all_dsep_separators),
             )
         )
 
@@ -1217,9 +1485,10 @@ def conservative_ci_constraints_from_adjacency(
         constraints.extend(
             [c for c in collider_pairs if c.get("mode") == "marginal_independent"]
         )
-    constraints.extend(
-        [c for c in collider_pairs if c.get("mode") == "conditional_dependent"]
-    )
+    if add_collider_conditional_dependence:
+        constraints.extend(
+            [c for c in collider_pairs if c.get("mode") == "conditional_dependent"]
+        )
     if add_shielded_collider_dependence:
         constraints.extend(
             shielded_collider_dependence_constraints_from_adjacency(

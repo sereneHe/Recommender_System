@@ -8,8 +8,16 @@ import yaml
 
 _ALLOWED_ARTIFACT_NAMES = {
     "config.yaml",
+    "constraint_counts.csv",
+    "constraint_metadata.csv",
+    "constraint_stat_audit.csv",
+    "cv_fold_metrics.csv",
+    "ci_window_filter_audit.csv",
+    "cv_errors.yaml",
+    "cv_score_normalizers.yaml",
     "cv_validation_history.yaml",
     "validation_history.yaml",
+    "w_constraint_audit.csv",
 }
 
 

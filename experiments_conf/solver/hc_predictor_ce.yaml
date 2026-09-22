@@ -1,23 +1,26 @@
+# Inherit shared HC training/constraint defaults from the base solver.  This
+# keeps experiment scripts focused on data, seed and the backend under test.
+defaults:
+  - hc_predictor
+  - _self_
+
 name: hc_predictor_ce
 model_name: HC-CE
 custom_objective: lagrange
 N_SELECT_FEATURES: 16
-n_runs: 5
 cv_target_bins: 3
-recalculate_dag: true
 #feature_selector: SequentialFeatureSelector
-feature_selector: none
 
-n_outer: 10
-n_inner: 100
-hidden_dim: 32
-depth: 2
 use_validation: true
 validation_fraction: 0.2
-validation_random_state: 0
 validation_min_delta: 0.0
 early_stopping_patience: 0
 restore_best_validation_model: true
+
+# HC-CE uses the generated independence/dependence constraints directly.
+# Keep W_est for constructing those constraints, but do not also impose the
+# original (W_est - I) mean([X, y_hat]) = 0 constraints.
+use_w_constraints: false
 
 # MILP parameters
 loss_type: l2
@@ -40,40 +43,31 @@ data_path: './data/'
 knowledge_graph_filename: 'knowledge_graph_intersection.graphml'
 debug: false
 
-# Conditional independence penalty parameters
-use_ci_penalty: true
-ci_penalty_kind: discrete_conditional_independence
-# Strict discrete CI diagnostic uses hard quantile bins; the trainable loss uses
-# a soft quantile-bin conditional mutual information approximation.
-ci_discrete_n_bins: 4
-ci_discrete_soft_temperature: 0.2
-ci_discrete_max_z_states: 256
-# CE constraint backend:
-# - alm_pbm: independence uses ALM equality, dependence uses PBM inequality.
-# - alm_all: independence and dependence both use ALM equality-style constraints.
-# - pbm_all: independence and dependence both use PBM inequalities.
-ce_constraint_backend: alm_pbm
-ci_mode: manual
-ci_manual_from_training_dag: true
-#ci_threshold: 0.0001
-ci_threshold: 0.1
-ci_skip_if_direct_edge: true
-ci_add_dsep_independence: true
-ci_add_collider_marginal_independence: true
-
-#shielded_collider
-ci_add_shielded_collider_dependence: true
-ci_use_shielded_collider_limits: true
-ci_shielded_dependent_margin: 0.01
-ci_max_shielded_constraints_per_collider: 2
-ci_max_shielded_constraints_per_target: 4
-ci_shielded_exclude_target_in_pair: true
-
-ci_max_dsep_separator_size: 3
-ci_dependent_margin: 0.05
 ce_independence_tolerance: 0.0
-ce_use_balanced_batches: true
-ce_batch_size: 128
+# Continuous CE uses a dimensionless partial correlation by default.  The
+# scalar shrinkage is an explicit experimental regularizer, not a
+# Ledoit-Wolf covariance estimator; compare shrinkage=0 in ablations.
+ce_statistic_kind: partial_correlation
+ce_statistic_shrinkage: 0.1
+ce_statistic_eps: 1.0e-8
+ce_tolerance_mode: standard_error
+ce_tolerance_sd_multiplier: 1.96
+# auto uses empirical contiguous-window spread when >= 5 windows of 100 rows
+# are available; otherwise it falls back to Newey-West HAC. This is an
+# uncertainty scale, not a classical iid confidence interval.
+ce_se_method: auto
+ce_window_n_windows: 5
+ce_window_min_size: 100
+ce_hac_max_lag: 6
+# Sign-flip filtering applies only to signed dependence constraints. For
+# d-separation independences, sign changes around the null value zero are not
+# a validity diagnostic and those constraints are never removed for that.
+ce_window_filter_enabled: true
+ce_window_max_sign_flip_rate: 0.30
+ce_window_sign_epsilon: 0.01
+ce_residualize_method: linear
+ce_residualize_iterations: 12
+ce_residualize_eps: 0.001
 # auto: discrete targets use target-value groups; continuous targets use target quantile pseudo groups.
 ce_sensitive_group_source: auto
 ce_sensitive_bins: 4
@@ -114,13 +108,3 @@ sco_alm_penalty_range:
 sco_pbm_penalty_range:
   - 0.000001
   - 1000000.0
-# NN parameters
-constrained: true
-use_w_constraints: true
-rho0: 1.0
-lambda0: 1.0
-alm_momentum: 0.6
-rho_mult: 1.0
-learning_rate: 0.25
-lambda_update_rate: 1.0
-weight_decay: 0.25

@@ -2,7 +2,19 @@ name: hc_predictor
 model_name: HC
 custom_objective: lagrange #mse_builtin #mse_custom
 N_SELECT_FEATURES: 5
-n_runs: 10
+n_runs: 5
+random_state: 42
+cv_random_state: ${.random_state}
+validation_random_state: ${.random_state}
+# ``site_gender`` preserves the historical CoDiet-aware split. Industry
+# experiment scripts explicitly select ``time_series``.
+cv_strategy: site_gender
+cv_time_test_size: null
+cv_time_gap: 0
+# HC-CE can use the latest inner-training block as validation and fit its DAG
+# without reading that validation block.
+validation_split_strategy: random
+dag_fit_scope: outer_train
 recalculate_dag: true
 # feature_selector: SequentialFeatureSelector
 feature_selector: none
@@ -20,8 +32,14 @@ learning_rate: 0.25
 lr_decay: 0.95
 lambda_update_rate: 1.0
 weight_decay: 0.25
+# Optimization loss; prediction reporting remains raw MSE/NMSE.
+prediction_loss: mse
+huber_delta: 1.0
 
 #EXDBN parameters
+# DAG solver backend.  The historical implementation remains the default;
+# set to ``milp_clique`` only for an explicit clique-solver comparison.
+dag_solver_backend: milp
 loss_type: l2
 reg_type: l2
 a_reg_type: l1
@@ -33,6 +51,20 @@ callback_mode: all_cycles # shortest_cycle
 robust: false
 tabu_edges: false
 weights_bound: 1.0
+# Optional structural-sparsity controls used by the dense-graph screen.
+# Defaults preserve the historical ExDBN objective and feasible set.
+edge_penalty: 0.0
+max_parents: null
+# Optional lazy clique cuts, ported from project-bestdagsolverintheworld's
+# ``solve_milp_clique.py``.  They cap clique size in the undirected skeleton;
+# they are disabled unless an experiment explicitly supplies a valid cap.
+enable_clique_constraints: false
+max_clique_size: null
+clique_callback_mode: first_clique
+clique_cut_formulation: k_plus_1
+clique_top_k: 5
+max_clique_cuts_per_callback: 0
+deduplicate_clique_cuts: true
 time_limit: 1800
 target_mip_gap: 0.0001
 
@@ -42,3 +74,53 @@ knowledge_graph_filename: 'knowledge_graph_intersection.graphml'
 
 # debugging
 debug: false
+
+# Shared HC-CE constraint defaults.  hc_predictor_ce.yaml inherits this
+# solver config, so comparison scripts only need to select a backend/seed.
+use_ci_penalty: true
+ci_penalty_kind: discrete_conditional_independence
+ci_discrete_n_bins: 4
+ci_discrete_soft_temperature: 0.2
+ci_discrete_max_z_states: 256
+ce_constraint_backend: alm_pbm
+ci_mode: manual
+ci_manual_from_training_dag: true
+ci_threshold: 0.1
+ci_skip_if_direct_edge: true
+ci_add_dsep_independence: true
+ci_add_collider_marginal_independence: true
+# Unshielded collider dependence was historically always added by the
+# conservative builder.  Keep that legacy default, but make it independently
+# selectable so an "independence-only" experiment is actually pure.
+ci_add_collider_conditional_dependence: true
+ci_add_shielded_collider_dependence: true
+ci_use_shielded_collider_limits: true
+ci_max_shielded_constraints_per_collider: 2
+ci_max_shielded_constraints_per_target: 4
+ci_shielded_exclude_target_in_pair: true
+ci_max_dsep_separator_size: 3
+# Phase-1-only option: enumerate all d-separators up to the size bound so the
+# subset-pruning ablation has a nontrivial candidate pool.
+ci_dsep_all_separators: false
+ci_dependent_margin: 0.05
+ci_shielded_dependent_margin: 0.01
+# Optional Phase-1 ablation: keep only minimal conditioning sets for each
+# endpoint pair.  This is a heuristic, not a generally equivalent CI rule.
+ci_prune_redundant: false
+ci_target_related_only: true
+# ``endpoint`` is required when interpreting a CE constraint as
+# T(X_i, prediction_target | Z).  ``any`` preserves the historical filter.
+ci_target_constraint_role: any
+# A signed residual covariance is not a generic dependence strength.  The
+# synthetic dependent-constraint screen opts into ``absolute`` explicitly.
+ci_dependent_statistic: signed
+# Optional held-out diagnostic artifacts.  Enabled only by audit scripts.
+constraint_audit_enabled: false
+constraint_audit_oracle: none
+use_w_constraints: true
+# ``model_standardized`` is correct for W estimated by the MILP, which fits
+# standardized X/Y. The phase-1 synthetic true-W arm explicitly selects
+# ``raw_sem`` so its known raw SEM coefficients are transformed before use.
+w_matrix_space: model_standardized
+ce_use_balanced_batches: true
+ce_batch_size: 128

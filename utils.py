@@ -1,6 +1,19 @@
 import functools
 import logging
 
+
+def coerce_random_state(value, default=42):
+    """Return an integer random state, treating an empty config value as unset."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return int(default)
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Random state must be an integer or empty, got {value!r}."
+        ) from exc
+
+
 def log_exceptions(function):
     """
     A decorator that wraps the passed in function and logs
@@ -21,6 +34,11 @@ def log_exceptions(function):
 
 
 def plot_heatmap(W, names_x, names_y, filename=None, dpi=None):
+    # Experiments run from a terminal/Codex session may not have a valid
+    # Cocoa application context.  Force a file-only backend before importing
+    # pyplot so matplotlib does not initialize the macOS GUI backend.
+    import matplotlib
+    matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
 
     # Remove '_lag0' suffix from names

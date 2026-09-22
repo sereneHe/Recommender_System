@@ -16,6 +16,7 @@ from experiments_utils import log_system_info, log_params_from_omegaconf_dict
 from recommender import run_recommender
 from recommender_utils import run_feature_selection_scikit
 from utils import log_exceptions, plot_heatmap
+from artifact_utils import write_yaml_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +82,39 @@ def start_experiment(cfg: DictConfig) -> None:
                 end_date=cfg.problem.get("end_date"),
                 impute=cfg.problem.get("impute", "none"),
                 dropna_selected=cfg.problem.get("dropna_selected", True),
+                feature_lag=cfg.problem.get("feature_lag", 0),
+                add_time_trend=cfg.problem.get("add_time_trend", False),
+                regime_break_date=cfg.problem.get("regime_break_date", None),
             )
         if cfg.problem.name == 'Sachs':
             import sachs_utils
             #from sachs_utils import load_data
             prep_data = sachs_utils.load_data(cfg.problem.variant, cfg.problem.normalize, cfg.problem.data_path)
+        if cfg.problem.name == "synthetic":
+            from synthetic_utils import load_data as load_synthetic_data
+
+            prep_data, w_est = load_synthetic_data(
+                n_samples=cfg.problem.n_samples,
+                n_nodes=cfg.problem.n_nodes,
+                expected_edges=cfg.problem.expected_edges,
+                graph_type=cfg.problem.graph_type,
+                sem_type=cfg.problem.get("sem_type", "gauss"),
+                noise_scale=cfg.problem.get("noise_scale", 1.0),
+                noise_df=cfg.problem.get("noise_df", 5.0),
+                seed=cfg.problem.seed,
+                graph_seed=cfg.problem.get("graph_seed", None),
+                noise_seed=cfg.problem.get("noise_seed", None),
+            )
+            expected_columns = list(cfg.problem.features) + [cfg.problem.target]
+            if list(prep_data.columns) != expected_columns:
+                raise ValueError(
+                    "Synthetic problem features/target must match generated columns: "
+                    f"expected {expected_columns}, got {list(prep_data.columns)}."
+                )
+            row_and_col_names = list(prep_data.columns)
+            true_w_path = join(output_dir, "W_true.csv")
+            np.savetxt(true_w_path, w_est, delimiter=",")
+            mlflow.log_artifact(true_w_path)
         if cfg.problem.name in ["cds", "Sachs"]:
             with zipfile.ZipFile(join(cfg.problem.data_path, "W_est.csv.zip")) as z:
                 with z.open(f"W_est_{cfg.problem.name}.csv") as f:
@@ -99,7 +128,12 @@ def start_experiment(cfg: DictConfig) -> None:
         print(row_and_col_names)
         start_time = time.time()
         target_feat = cfg.problem.target
-        full_feats = cfg.problem.features
+        full_feats = list(cfg.problem.features) if cfg.problem.get("features") is not None else None
+        if cfg.problem.name == "industry_eu" and full_feats is not None:
+            if bool(cfg.problem.get("add_time_trend", False)):
+                full_feats.append("time_trend")
+            if cfg.problem.get("regime_break_date", None) not in (None, "", "null", "None"):
+                full_feats.append("regime_post_break")
         if 'N_SELECT_FEATURES' in cfg.solver:
             n_select_features = cfg.solver.N_SELECT_FEATURES
         else:
@@ -135,14 +169,45 @@ def start_experiment(cfg: DictConfig) -> None:
 
         #curr_feats, curr_train_err, curr_test_err, all_train_errs, all_test_errs = run_recommender(food_feats, non_food_feats, prep_data, target_feat, w_est, row_and_col_names, cfg.solver.model_name, cfg.solver.custom_objective, cfg.solver.N_SELECT_FEATURES, cfg.solver.n_runs, cfg.solver)
 
-        log_dict({
+        cv_errors = {
             'train_errs': all_train_errs.tolist(),
-            'test_errs': all_test_errs.tolist()},
-            'cv_errors.yaml')
-        for artifact_name in ("validation_history.yaml", "cv_validation_history.yaml"):
+            'test_errs': all_test_errs.tolist(),
+        }
+        # The phase-1 summarizer scans the durable Hydra output tree.  MLflow
+        # keeps its own copy, but a local artifact makes the PBS result
+        # self-contained and avoids relying on tracker internals.
+        write_yaml_artifact('cv_errors.yaml', cv_errors)
+        log_dict(cv_errors, 'cv_errors.yaml')
+        for artifact_name in (
+            "cv_errors.yaml",
+            "validation_history.yaml",
+            "cv_validation_history.yaml",
+            "cv_score_normalizers.yaml",
+            "constraint_counts.csv",
+            "constraint_metadata.csv",
+            "constraint_stat_audit.csv",
+            "w_constraint_audit.csv",
+        ):
             artifact_path = Path(output_dir) / artifact_name
             if artifact_path.exists():
                 log_artifact(str(artifact_path))
+        constraint_counts_path = Path(output_dir) / "constraint_counts.csv"
+        if constraint_counts_path.exists():
+            try:
+                log_table(pd.read_csv(constraint_counts_path), "constraint_counts.json")
+            except Exception as exc:
+                logger.warning("Could not log constraint count table: %s", exc)
+        for artifact_name in (
+            "constraint_metadata.csv",
+            "constraint_stat_audit.csv",
+            "w_constraint_audit.csv",
+        ):
+            artifact_path = Path(output_dir) / artifact_name
+            if artifact_path.exists():
+                try:
+                    log_table(pd.read_csv(artifact_path), artifact_name.replace(".csv", ".json"))
+                except Exception as exc:
+                    logger.warning("Could not log audit table %s: %s", artifact_name, exc)
         # print(result)
         #
         # assert len(result) == 1

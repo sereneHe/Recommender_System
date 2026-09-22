@@ -5,7 +5,30 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from humancompatible.train.dual_optim import ALM, MoreauEnvelope
-from torch.nn import MSELoss
+from torch.nn import MSELoss, SmoothL1Loss
+
+
+def make_regression_loss(cfg):
+    """Return the train/validation loss selected for an NN predictor.
+
+    Evaluation remains raw MSE in ``compute_predictor_errors_scikit``.  This
+    switch only changes the optimization objective, allowing the time-series
+    experiment to compare a robust Huber objective against the historical MSE
+    objective without changing the reported prediction metric.
+    """
+
+    kind = str(getattr(cfg, "prediction_loss", "mse")).strip().lower()
+    if kind in {"mse", "l2"}:
+        return MSELoss()
+    if kind in {"huber", "smooth_l1", "smoothl1"}:
+        delta = float(getattr(cfg, "huber_delta", 1.0))
+        if delta <= 0.0:
+            raise ValueError("huber_delta must be positive.")
+        return SmoothL1Loss(beta=delta)
+    raise ValueError(
+        "prediction_loss must be one of {'mse', 'huber', 'smooth_l1'}, "
+        f"got {kind!r}."
+    )
 
 
 class MLPRegressor(nn.Module):
@@ -69,7 +92,7 @@ def fit_aug_lagrangian_nn_constraint(
         raise ValueError("Constraint does not depend on predictions.")
     logging.info(f"Sanity check: GT constraint = {W_constraint(v, g0, y)}")
 
-    loss = MSELoss()
+    loss = make_regression_loss(cfg)
 
     for outer in range(cfg.n_outer):
         for _ in range(cfg.n_inner):
