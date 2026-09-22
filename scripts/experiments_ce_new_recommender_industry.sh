@@ -1,111 +1,149 @@
 #!/usr/bin/env bash
-# CE-Lite recommender: FRED monthly industry pre-audit and full CE-Lite runs.
+# CE New-Recommender screens on FRED 16-country monthly industry data.
 #
-# Two stages:
+# Industry: near-dense, strongly co-moving monthly macro panel; small n
+# (~150-250 observations), no known ground-truth DAG, strong autocorrelation.
+# This is the hardest case for CE.  The configuration therefore uses:
+#   - W constraints as the primary stable one-shot moments
+#   - birth-death posterior CI filtering (HC_CE_BD_MCMC=1, high support)
+#   - partial correlation + strong shrinkage (0.3)
+#   - Newey-West HAC standard errors (monthly autocorrelation), tolerance k=2.5
+#   - dependent/shielded collider constraints always disabled
 #
-#   STAGE=preaudit    (default) run the paired DNN-only vs W+CE-Lite screen on
-#                     the FRED targets, write the audit artifacts, and emit the
-#                     three-stage Go/No-Go gate.  Use the gate to decide which
-#                     countries are worth a full run.
-#
-#   STAGE=ce_lite_go  run the full CE-Lite arm (W + high-confidence CE with
-#                     partial-correlation/shrinkage/time-series SE) on the
-#                     selected targets, over the seed list.
-#
-# Usage:
-#   STAGE=preaudit bash scripts/experiments_ce_new_recommender_industry.sh
-#   STAGE=ce_lite_go \
-#     PROBLEMS=FRED_16country_monthly/industry_eu_ita,FRED_16country_monthly/industry_eu_svn \
-#     bash scripts/experiments_ce_new_recommender_industry.sh
-#
-# Recognised environment: STAGE, PROBLEMS, DATASET_SCOPE (all|pilot), SEEDS,
-# TIME_LIMIT, N_RUNS, N_OUTER, N_INNER, CV_TIME_TEST_SIZE, CV_TIME_GAP,
-# EXPERIMENT_PREFIX, SUMMARY_ROOT, DRY_RUN, plus trailing Hydra overrides.
+# Run the pre-audit first (n_constraints / stability / SNR).  Only if at least
+# one country passes the three Go criteria should the full CE-Lite arms below be
+# launched on that country.
 
-set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLAN_DIR="${SCRIPT_DIR}/causal_predictor_plan"
+announce_stage "CE-NEW-INDUSTRY" "FRED 16-country monthly: CE-Lite with W + BD-filtered CE"
 
+GROUP="${GROUP:-FRED_16country_monthly}"
+PREAUDIT_PROBLEMS="${PREAUDIT_PROBLEMS:-${GROUP}/industry_eu_est,${GROUP}/industry_eu_ita,${GROUP}/industry_eu_svn,${GROUP}/industry_eu_aut,${GROUP}/industry_eu_deu}"
+ALL_PROBLEMS="${ALL_PROBLEMS:-${GROUP}/industry_eu_aut,${GROUP}/industry_eu_bel,${GROUP}/industry_eu_deu,${GROUP}/industry_eu_esp,${GROUP}/industry_eu_est,${GROUP}/industry_eu_fin,${GROUP}/industry_eu_fra,${GROUP}/industry_eu_grc,${GROUP}/industry_eu_irl,${GROUP}/industry_eu_ita,${GROUP}/industry_eu_ltu,${GROUP}/industry_eu_lux,${GROUP}/industry_eu_nld,${GROUP}/industry_eu_prt,${GROUP}/industry_eu_svk,${GROUP}/industry_eu_svn}"
+EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-PLAN_CE_NEW_INDUSTRY}"
 STAGE="${STAGE:-preaudit}"
+TIME_LIMIT="${TIME_LIMIT:-120}"
+N_RUNS="${N_RUNS:-4}"
+TIME_TEST_SIZE="${TIME_TEST_SIZE:-12}"
+
+LR="${LR:-0.03}"
+WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
+HIDDEN_DIM="${HIDDEN_DIM:-32}"
+DEPTH="${DEPTH:-2}"
+N_OUTER="${N_OUTER:-10}"
+N_INNER="${N_INNER:-100}"
+
+export HC_CONSTRAINT_BACKEND="${HC_CONSTRAINT_BACKEND:-alm}"
 export HC_WEIBULL_GAUSSIANIZE=0
+
+# Posterior-stable constraints are mandatory for industry: single-MILP d-sep
+# constraints are too unstable across folds / graph seeds.
+export HC_CE_BD_MCMC="${HC_CE_BD_MCMC:-1}"
+export HC_CE_BD_CHAINS="${HC_CE_BD_CHAINS:-4}"
+export HC_CE_BD_STEPS="${HC_CE_BD_STEPS:-1500}"
+export HC_CE_BD_BURN_IN="${HC_CE_BD_BURN_IN:-300}"
+export HC_CE_BD_INDEPENDENCE_SUPPORT="${HC_CE_BD_INDEPENDENCE_SUPPORT:-0.85}"
+export HC_CE_BD_MAX_CONFLICT_SUPPORT="${HC_CE_BD_MAX_CONFLICT_SUPPORT:-0.15}"
+
+COMMON=(
+  "solver.time_limit=${TIME_LIMIT}"
+  "solver.n_runs=${N_RUNS}"
+  "solver.cv_strategy=time_series"
+  "solver.cv_time_test_size=${TIME_TEST_SIZE}"
+  "solver.cv_time_gap=0"
+  "solver.recalculate_dag=true"
+  "solver.feature_selector=none"
+  "solver.prediction_loss=mse"
+  "solver.learning_rate=${LR}"
+  "solver.weight_decay=${WEIGHT_DECAY}"
+  "solver.hidden_dim=${HIDDEN_DIM}"
+  "solver.depth=${DEPTH}"
+  "solver.n_outer=${N_OUTER}"
+  "solver.n_inner=${N_INNER}"
+)
+
+# Upgraded CE-Lite for small/time-series macro panels.
+CE_LITE_COMMON=(
+  "solver.constrained=true"
+  "solver.use_w_constraints=true"
+  "solver.use_ci_penalty=true"
+  "solver.ci_penalty_kind=conditional_expectation"
+  "solver.ce_statistic_kind=partial_correlation"
+  "solver.ce_statistic_shrinkage=0.3"
+  "solver.ce_residualize_method=linear"
+  "solver.ce_se_method=hac"
+  "solver.ce_hac_max_lag=6"
+  "solver.ce_tolerance_sd_multiplier=2.5"
+  "solver.ci_add_dsep_independence=true"
+  "solver.ci_add_collider_marginal_independence=false"
+  "solver.ci_add_collider_conditional_dependence=false"
+  "solver.ci_add_shielded_collider_dependence=false"
+  "solver.ce_use_balanced_batches=false"
+  "solver.ce_batch_size=128"
+  "solver.ci_pbm_penalty_update=dimin_adapt"
+  "solver.ci_pbm_init_duals=0.005"
+  "solver.ci_pbm_penalty_range=[0.001,20]"
+  "solver.ci_pbm_dual_range=[0.001,20]"
+  "solver.validation_split_strategy=time"
+  "solver.dag_fit_scope=inner_train"
+  "solver.early_stopping_patience=2"
+  "solver.ce_pbm_backend=stochastic_pbm"
+)
 
 case "${STAGE}" in
   preaudit)
-    export DATASET_GROUPS="industry"
-    export EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-CE_NEW_INDUSTRY_PREAUDIT}"
-    echo "=== CE-Lite industry pre-audit (Go/No-Go screen) ==="
-    bash "${PLAN_DIR}/09_ce_preaudit.sh" "$@"
-    if [[ "${DRY_RUN:-0}" != "1" && -n "${SUMMARY_ROOT:-}" ]]; then
-      "${PYTHON_BIN:-python3}" "${PLAN_DIR}/summarize_ce_preaudit.py" \
-        --root "${SUMMARY_ROOT}" --output-dir "${SUMMARY_DIR:-${SUMMARY_ROOT}}"
+    # Stage P: constraint audit. Runs the CE arm with the audit enabled and a
+    # deliberately small training budget (constraints come from the DAG, not
+    # from a converged predictor), then applies the A+B pre-audit gate:
+    #   n_constraints >= 3, cross-seed support >= 0.60, SNR >= 2.0.
+    # Only problems that pass should be promoted to STAGE=ce_lite_go.
+    AUDIT_N_OUTER="${AUDIT_N_OUTER:-1}"
+    AUDIT_N_INNER="${AUDIT_N_INNER:-1}"
+    echo "Running CE pre-audit on: ${PREAUDIT_PROBLEMS}"
+    run_seeded "ce_audit" "${EXPERIMENT_PREFIX}" "hc_predictor_ce" "${PREAUDIT_PROBLEMS}" false \
+      "${COMMON[@]}" \
+      "${CE_LITE_COMMON[@]}" \
+      "solver.constraint_audit_enabled=true" \
+      "solver.n_outer=${AUDIT_N_OUTER}" \
+      "solver.n_inner=${AUDIT_N_INNER}"
+
+    if [[ "${DRY_RUN}" != "1" ]]; then
+      AUDIT_ROOT="${AUDIT_ROOT:-multirun}"
+      AUDIT_SUMMARY_DIR="${AUDIT_SUMMARY_DIR:-results/ce_preaudit}"
+      "${PYTHON_BIN}" scripts/causal_predictor_plan/summarize_ce_preaudit.py \
+        --root "${AUDIT_ROOT}" --output-dir "${AUDIT_SUMMARY_DIR}" --stage preaudit
+      echo "Pre-audit gate: ${AUDIT_SUMMARY_DIR}/ce_preaudit_gate.csv"
+      echo "Promote the Go countries with:"
+      echo "  STAGE=ce_lite_go PROBLEMS=<comma list> bash $0"
     else
-      echo
-      echo "Next: summarize the runs to get the Go/No-Go gate, e.g."
-      echo "  python3 ${PLAN_DIR}/summarize_ce_preaudit.py --root <hydra-output-root>"
-      echo "or set SUMMARY_ROOT=<hydra-output-root> to run it automatically."
+      echo "DRY_RUN: skipping summarize_ce_preaudit.py"
     fi
     ;;
 
   ce_lite_go)
-    # Source the shared launcher helpers with the trailing overrides so that
-    # run_seeded forwards them to every Hydra call.
-    source "${PLAN_DIR}/_common.sh" "$@"
-    require_env PROBLEMS
-    export EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-CE_NEW_INDUSTRY_CE_LITE}"
-    TIME_LIMIT="${TIME_LIMIT:-120}"
-    N_RUNS="${N_RUNS:-5}"
-    N_OUTER="${N_OUTER:-10}"
-    N_INNER="${N_INNER:-100}"
-    CV_TIME_TEST_SIZE="${CV_TIME_TEST_SIZE:-12}"
-    CV_TIME_GAP="${CV_TIME_GAP:-0}"
+    # Stage L: full CE-Lite only on problems that passed pre-audit.
+    # Set PROBLEMS to the audited Go countries first.
+    run_seeded "hce_lite" "${EXPERIMENT_PREFIX}" "hc_predictor_ce" "${PROBLEMS}" false \
+      "${COMMON[@]}" \
+      "${CE_LITE_COMMON[@]}"
 
-    announce_stage "CE-Lite" "full FRED CE-Lite on selected targets"
+    # Baseline: same network / CV / seed but no constraints.
+    run_seeded "s0_no_constraint" "${EXPERIMENT_PREFIX}" "hc_predictor_ce" "${PROBLEMS}" false \
+      "${COMMON[@]}" \
+      "solver.constrained=false" \
+      "solver.use_w_constraints=false" \
+      "solver.use_ci_penalty=false"
 
-    COMMON=(
-      "solver.time_limit=${TIME_LIMIT}"
-      "solver.n_runs=${N_RUNS}"
-      "solver.n_outer=${N_OUTER}"
-      "solver.n_inner=${N_INNER}"
-      "solver.cv_strategy=time_series"
-      "solver.cv_time_test_size=${CV_TIME_TEST_SIZE}"
-      "solver.cv_time_gap=${CV_TIME_GAP}"
-      "solver.validation_split_strategy=time"
-      "solver.recalculate_dag=true"
-      "solver.dag_fit_scope=inner_train"
-      "solver.feature_selector=none"
-      "solver.constraint_audit_enabled=true"
-      "solver.ci_mode=manual"
-      "solver.ci_manual_from_training_dag=true"
-      "solver.ci_target_related_only=true"
-      "solver.ci_add_dsep_independence=true"
-      "solver.ci_add_collider_marginal_independence=false"
-      "solver.ci_add_collider_conditional_dependence=false"
-      "solver.ci_add_shielded_collider_dependence=false"
-      "solver.ci_penalty_kind=conditional_expectation"
-      "solver.ce_constraint_backend=alm_pbm"
-      "solver.ce_independence_tolerance=0.0"
-      "solver.ce_tolerance_mode=standard_error"
-      "solver.ce_tolerance_sd_multiplier=1.96"
-      "solver.ce_se_method=auto"
-      "solver.ce_window_n_windows=5"
-      "solver.ce_window_min_size=100"
-      "solver.ce_hac_max_lag=6"
-      "solver.ce_window_filter_enabled=true"
-      "solver.ce_window_max_sign_flip_rate=0.30"
-      "solver.ce_statistic_kind=partial_correlation"
-      "solver.ce_statistic_shrinkage=${CE_SHRINKAGE:-0.1}"
-      "solver.ce_residualize_method=${CE_RESIDUALIZE_METHOD:-linear}"
+    # HC reference: W constraints only (no CE), same everything else.
+    run_seeded "hc_w_only" "${EXPERIMENT_PREFIX}" "hc_predictor" "${PROBLEMS}" false \
+      "${COMMON[@]}" \
       "solver.constrained=true"
-      "solver.use_ci_penalty=true"
-      "solver.use_w_constraints=true"
-    )
-    run_seeded "ce_lite" "${EXPERIMENT_PREFIX}" "hc_predictor_ce" "${PROBLEMS}" false \
-      "${COMMON[@]}"
     ;;
 
   *)
-    echo "ERROR: STAGE must be 'preaudit' or 'ce_lite_go', got '${STAGE}'." >&2
-    exit 2
+    die "Unknown STAGE=${STAGE}. Use 'preaudit' or 'ce_lite_go'."
     ;;
 esac
+
+echo "=== CE-NEW-INDUSTRY complete ==="

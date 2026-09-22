@@ -58,6 +58,11 @@ ce_tolerance_sd_multiplier: 1.96
 ce_se_method: auto
 ce_window_n_windows: 5
 ce_window_min_size: 100
+# Aliases used by the CE-new launch scripts (experiments_ce_new_recommender_*).
+# Kept null so the canonical keys above win unless a script explicitly sets an
+# alias; hc_predictor_ce.py accepts either name.
+ce_cross_window_n_windows: null
+ce_cross_window_min_size: null
 ce_hac_max_lag: 6
 # Sign-flip filtering applies only to signed dependence constraints. For
 # d-separation independences, sign changes around the null value zero are not

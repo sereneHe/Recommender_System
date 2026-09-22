@@ -775,10 +775,36 @@ def _ce_residuals_for_spec(X, y, spec, cfg=None):
     )
 
 
+def _ce_window_setting(cfg, canonical, alias, default):
+    """Read a CE window setting, accepting the launch-script alias.
+
+    The CE-new launch scripts use ``ce_cross_window_n_windows`` and
+    ``ce_cross_window_min_size`` while the implementation originally shipped
+    ``ce_window_n_windows`` and ``ce_window_min_size``.  Accept both names so
+    the scripts and the code agree instead of failing on an unknown Hydra key.
+    """
+    if cfg is not None:
+        # Prefer the alias when it is explicitly set (default is null); fall
+        # back to the canonical key otherwise.
+        for name in (alias, canonical):
+            value = getattr(cfg, name, None)
+            if value is not None:
+                return int(value)
+    return int(default)
+
+
+def _ce_window_n_windows(cfg, default=5):
+    return _ce_window_setting(cfg, "ce_window_n_windows", "ce_cross_window_n_windows", default)
+
+
+def _ce_window_min_size(cfg, default=100):
+    return _ce_window_setting(cfg, "ce_window_min_size", "ce_cross_window_min_size", default)
+
+
 def _resolve_ce_se_method(cfg, n):
     method = str(getattr(cfg, "ce_se_method", "auto") if cfg is not None else "hac").strip().lower()
-    n_windows = int(getattr(cfg, "ce_window_n_windows", 5)) if cfg is not None else 5
-    min_window_size = int(getattr(cfg, "ce_window_min_size", 100)) if cfg is not None else 100
+    n_windows = _ce_window_n_windows(cfg)
+    min_window_size = _ce_window_min_size(cfg)
     enough_windows = n >= n_windows * min_window_size
     if method == "auto":
         return "window" if enough_windows else "hac"
@@ -810,8 +836,8 @@ def constraint_window_statistics(X, y, spec, cfg=None):
     standard error. Sign-flip rate is descriptive only for independence specs.
     """
     n = int(X.shape[0])
-    n_windows = int(getattr(cfg, "ce_window_n_windows", 5)) if cfg is not None else 5
-    min_window_size = int(getattr(cfg, "ce_window_min_size", 100)) if cfg is not None else 100
+    n_windows = _ce_window_n_windows(cfg)
+    min_window_size = _ce_window_min_size(cfg)
     if n_windows < 2 or n < n_windows * min_window_size:
         return {
             "window_count": 0,
@@ -1116,7 +1142,7 @@ def filter_unstable_signed_dependence_constraints(X, y, ci_constraints, cfg=None
     n = int(X.shape[0])
     if _resolve_ce_se_method(cfg, n) != "window":
         return list(ci_constraints), diagnostics
-    n_windows = int(getattr(cfg, "ce_window_n_windows", 5))
+    n_windows = _ce_window_n_windows(cfg)
     window_size = n // n_windows
     max_flip_rate = float(getattr(cfg, "ce_window_max_sign_flip_rate", 0.30))
     sign_epsilon = float(getattr(cfg, "ce_window_sign_epsilon", 0.01))

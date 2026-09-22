@@ -187,6 +187,9 @@ def _apply_gate(runs, stability, paired, thresholds):
             reasons.append("B:snr/sign_flip")
         if not stage_c_pass:
             reasons.append("C:paired_win_rate")
+        # The pre-audit gate decides Go/No-Go from constraint quality alone
+        # (A and B) because it runs before the paired CE-Lite comparison.
+        preaudit_pass = bool(stage_a_pass and stage_b_pass)
         gate_rows.append(
             {
                 "dataset": dataset,
@@ -203,6 +206,7 @@ def _apply_gate(runs, stability, paired, thresholds):
                 "stage_c_win_rate": win_rate,
                 "stage_c_n_paired_seeds": n_paired,
                 "stage_c_pass": bool(stage_c_pass),
+                "preaudit_decision": "Go" if preaudit_pass else "No-Go",
                 "decision": "Go" if (stage_a_pass and stage_b_pass and stage_c_pass) else "No-Go",
                 "failed_stages": ";".join(reasons) if reasons else "none",
             }
@@ -416,6 +420,16 @@ def main():
         default=DEFAULT_THRESHOLDS["min_paired_seeds"],
         help="Stage C: minimum paired seeds before the win rate is trusted.",
     )
+    parser.add_argument(
+        "--stage",
+        choices=("preaudit", "full"),
+        default="full",
+        help=(
+            "Which decision to headline: 'preaudit' uses stage A+B only "
+            "(constraint quality, run before the paired comparison); 'full' "
+            "also requires stage C (paired CE-Lite win rate)."
+        ),
+    )
     args = parser.parse_args()
     thresholds = {
         "min_constraints": args.min_constraints,
@@ -442,6 +456,21 @@ def main():
         f"C: win rate >= {thresholds['min_win_rate']:.0%} over "
         f">= {thresholds['min_paired_seeds']} paired seeds."
     )
+    try:
+        gate = pd.read_csv(gate_path)
+    except (OSError, pd.errors.EmptyDataError):
+        gate = pd.DataFrame()
+    if not gate.empty:
+        column = "preaudit_decision" if args.stage == "preaudit" else "decision"
+        if column in gate:
+            counts = gate[column].value_counts().to_dict()
+            go = ", ".join(
+                f"{row.dataset}" for _, row in gate.iterrows() if row[column] == "Go"
+            )
+            print(
+                f"[{args.stage}] decision column '{column}': "
+                f"{counts}. Go datasets: {go if go else '(none)'}"
+            )
     print(
         "The gate is a screening filter on the same folds; it is not a final "
         "held-out verdict. Violation-vs-error correlations remain descriptive."
