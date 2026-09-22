@@ -19,6 +19,11 @@
 # not described by the linear synthetic oracle or the raw-SEM W moment, so the
 # oracle is disabled for those arms and E6's W term is a deliberately
 # misspecified control.  E7 is the nonlinear no-constraint reference.
+#
+# Arms B0..B2 are method baselines (INCLUDE_BASELINES=0 to skip): B0 is the HC
+# NN predictor with the true W moment (hc_predictor + ALM), B1/B2 are mark and
+# mark_with_cc.  They follow scripts/replay_er_sf_baselines.sh and use the true
+# DAG so they are comparable with E0..E7.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
@@ -93,6 +98,32 @@ CE_COMMON=(
   "solver.constraint_audit_oracle=synthetic_linear_sem"
 )
 
+# hc_predictor baseline overrides.  Only keys that exist in hc_predictor.yaml
+# are passed (hc_predictor has no use_stochastic_constrained_optimizer key).
+BASELINE_NN_COMMON=(
+  "solver.time_limit=${TIME_LIMIT}"
+  "solver.n_runs=${N_RUNS}"
+  "solver.n_outer=${N_OUTER}"
+  "solver.n_inner=${N_INNER}"
+  "solver.feature_selector=none"
+  "solver.dag_fit_scope=inner_train"
+  "solver.constraint_audit_enabled=true"
+  "solver.ci_target_related_only=true"
+  "solver.ci_target_constraint_role=endpoint"
+  "solver.ce_use_balanced_batches=false"
+  "solver.ce_batch_size=128"
+  "solver.recalculate_dag=false"
+  "solver.constrained=true"
+  "solver.use_w_constraints=true"
+  "solver.w_matrix_space=raw_sem"
+  "solver.use_ci_penalty=false"
+  "solver.constraint_audit_oracle=synthetic_linear_sem"
+  "++problem.n_samples=${N_SAMPLES}"
+  "++problem.n_nodes=${N_NODES}"
+  "++problem.expected_edges=${EXPECTED_EDGES}"
+  "++problem.sem_type=gauss"
+)
+
 run_phase1_synthetic_ce_new() {
   local label="$1"
   shift 1
@@ -119,6 +150,74 @@ run_phase1_synthetic_ce_new() {
         run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
           "hc_predictor_ce" "${PROBLEMS}" "${seed_overrides[@]}" "$@"
       fi
+    done
+  done
+}
+
+# Baseline runner for the HC NN predictor (hc_predictor).  Keeps the same
+# graph/noise seed pairing as the CE arms; HC_CONSTRAINT_BACKEND selects the
+# ALM/SPBM dual backend used by replay_er_sf_baselines.sh.
+run_phase1_synthetic_nn_baseline() {
+  local label="$1"
+  local solver="$2"
+  local backend="$3"
+  shift 3
+
+  local graph_seed noise_seed model_seed
+  for graph_seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${graph_seed}" =~ ^[0-9]+$ ]] || die "Invalid GRAPH_SEEDS value ${graph_seed}."
+    for noise_seed in "${CE_NEW_NOISE_SEEDS[@]}"; do
+      [[ "${noise_seed}" =~ ^[0-9]+$ ]] || die "Invalid NOISE_SEEDS value ${noise_seed}."
+      model_seed="$((graph_seed * 100000 + noise_seed))"
+      export HC_SPBM_RANDOM_SEED="${model_seed}"
+      export HC_CONSTRAINT_BACKEND="${backend}"
+      local -a seed_overrides=(
+        "solver.random_state=${model_seed}"
+        "solver.cv_random_state=$((model_seed + 10000))"
+        "solver.validation_random_state=$((model_seed + 20000))"
+        "++problem.seed=${graph_seed}"
+        "++problem.graph_seed=${graph_seed}"
+        "++problem.noise_seed=${noise_seed}"
+      )
+      if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
+        run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
+          "${solver}" "${PROBLEMS}" "${seed_overrides[@]}" "$@" "${PLAN_EXTRA_OVERRIDES[@]}"
+      else
+        run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
+          "${solver}" "${PROBLEMS}" "${seed_overrides[@]}" "$@"
+      fi
+    done
+  done
+}
+
+# Baseline runner for the tree/XGB methods (mark, mark_with_cc).  Their configs
+# do not define the NN keys, so only keys they own are passed and keys absent
+# from their schema use Hydra's ``+`` append form.  Constraint audit is not
+# enabled: those estimators have no constraint_audit_rows.
+run_phase1_synthetic_tree() {
+  local label="$1"
+  local solver="$2"
+  shift 2
+
+  local graph_seed noise_seed model_seed
+  for graph_seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${graph_seed}" =~ ^[0-9]+$ ]] || die "Invalid GRAPH_SEEDS value ${graph_seed}."
+    for noise_seed in "${CE_NEW_NOISE_SEEDS[@]}"; do
+      [[ "${noise_seed}" =~ ^[0-9]+$ ]] || die "Invalid NOISE_SEEDS value ${noise_seed}."
+      model_seed="$((graph_seed * 100000 + noise_seed))"
+      local -a seed_overrides=(
+        "solver.random_state=${model_seed}"
+        "solver.n_runs=${N_RUNS}"
+        "solver.recalculate_dag=false"
+        "+solver.cv_strategy=site_gender"
+        "+solver.cv_time_test_size=null"
+        "+solver.cv_time_gap=0"
+        "++problem.seed=${graph_seed}"
+        "++problem.graph_seed=${graph_seed}"
+        "++problem.noise_seed=${noise_seed}"
+      )
+      run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
+        "${solver}" "${PROBLEMS}" "${seed_overrides[@]}" "$@"
     done
   done
 }
@@ -193,6 +292,21 @@ if [[ "${INCLUDE_NONLINEAR:-1}" == "1" ]]; then
     "solver.use_w_constraints=false" \
     "solver.use_ci_penalty=false" \
     "solver.constraint_audit_oracle=none"
+fi
+
+# Method baselines (INCLUDE_BASELINES=0 to skip).  Conventions follow
+# scripts/replay_er_sf_baselines.sh.  All use the true DAG
+# (recalculate_dag=false) so the comparison isolates the predictor.
+if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
+  # B0: HC NN predictor with the true W moment (ALM backend, no CE).
+  run_phase1_synthetic_nn_baseline "b0_hc_predictor_alm" "hc_predictor" "alm" \
+    "${BASELINE_NN_COMMON[@]}"
+
+  # B1/B2: MARK and MARK-CC tree baselines.
+  run_phase1_synthetic_tree "b1_mark" "mark"
+  run_phase1_synthetic_tree "b2_mark_with_cc" "mark_with_cc" \
+    "solver.n_outer=${N_OUTER}" \
+    "solver.time_limit=${TIME_LIMIT}"
 fi
 
 echo "=== CE-NEW-ER complete ==="
