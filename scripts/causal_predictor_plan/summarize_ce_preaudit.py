@@ -11,10 +11,13 @@ confounded by baseline fit quality, small fold counts, and wrong-DAG
 reverse causality.
 
 Independent constraints target zero: their |mean|/spread ratio and sign flips
-are descriptive and must not be used as a Go/No-Go gate. Stage C uses the
-same folds that produced the screening metrics, so the gate is a screening
-filter, not a final held-out verdict. Defaults require >=3 constraints,
->=60% seed support, and >=60% paired wins over W-only.
+are descriptive and must not be used as a Go/No-Go gate.  Instead Stage B
+requires that the observed independence statistic stays within its SE
+tolerance often enough (null compatibility); directional SNR/sign-flip gates
+apply only when dependence constraints are present. Stage C uses the same
+folds that produced the screening metrics, so the gate is a screening filter,
+not a final held-out verdict. Defaults require >=3 constraints, >=60% seed
+support, >=80% null compatibility, and >=60% paired wins over W-only.
 """
 
 import argparse
@@ -27,6 +30,7 @@ import yaml
 DEFAULT_THRESHOLDS = {
     "min_constraints": 3,
     "min_support_rate": 0.60,
+    "min_null_compatibility": 0.80,
     "min_window_snr": 2.0,
     "max_sign_flip_rate": 0.30,
     "min_win_rate": 0.60,
@@ -160,9 +164,12 @@ def _apply_gate(runs, stability, paired, thresholds):
             and support_fraction >= thresholds["min_support_rate"]
         )
 
-        # For an independence null, the statistic is expected to be near zero;
-        # |mean|/spread and sign flips are not valid Go criteria. Stage B is
-        # applicable only if directional dependence constraints are present.
+        # Stage B has two applicable sub-criteria. For an independence null the
+        # statistic is expected to be near zero, so |mean|/spread and sign flips
+        # are not valid; instead require that the observed statistic is
+        # compatible with the null (within its SE tolerance) often enough.
+        # Directional SNR/sign-flip gates apply only when dependence
+        # constraints are present.
         n_dependent = (
             int(
                 pd.to_numeric(
@@ -181,7 +188,22 @@ def _apply_gate(runs, stability, paired, thresholds):
         null_compatibility_median = _median_or_none(
             dataset_ce_runs.get("observed_independence_tolerance_compatibility_rate")
         )
-        if n_dependent:
+        has_independence = n_union > 0
+        has_dependence = n_dependent > 0
+
+        null_ok = True
+        if has_independence:
+            null_ok = (
+                null_compatibility_median is not None
+                and null_compatibility_median >= thresholds["min_null_compatibility"]
+            )
+
+        snr_value = None
+        flip_value = None
+        snr_source = "not_applicable_no_dependent_constraints"
+        flip_source = "not_applicable_no_dependent_constraints"
+        directional_ok = True
+        if has_dependence:
             snr_window = _median_or_none(dataset_ce_runs.get("median_window_abs_mean_over_spread"))
             flip_window = _median_or_none(dataset_ce_runs.get("median_window_sign_flip_rate_descriptive"))
             if snr_window is not None:
@@ -194,15 +216,17 @@ def _apply_gate(runs, stability, paired, thresholds):
                 flip_value, flip_source = _median_or_none(dataset_ce_runs.get("median_fold_sign_flip_rate")), "fold"
             snr_ok = snr_value is not None and snr_value >= thresholds["min_window_snr"]
             flip_ok = flip_value is None or flip_value <= thresholds["max_sign_flip_rate"]
-            stage_b_pass = bool(snr_ok and flip_ok)
-            stage_b_status = "directional_dependence_gate"
+            directional_ok = bool(snr_ok and flip_ok)
+
+        stage_b_pass = bool(null_ok and directional_ok)
+        if has_independence and has_dependence:
+            stage_b_status = "independence_null_compatibility+directional_dependence"
+        elif has_independence:
+            stage_b_status = "independence_null_compatibility"
+        elif has_dependence:
+            stage_b_status = "directional_dependence"
         else:
-            snr_value = None
-            snr_source = "not_applicable_for_independence_null"
-            flip_value = None
-            flip_source = "not_applicable_for_independence_null"
-            stage_b_pass = True
-            stage_b_status = "not_applicable_independence_null"
+            stage_b_status = "no_applicable_stage_b_criterion"
 
         # Stage C: paired screening comparison.
         win_rate, n_paired = paired_agg.get(dataset, (None, None))
@@ -236,6 +260,7 @@ def _apply_gate(runs, stability, paired, thresholds):
                 "median_independent_constraints_per_run": n_independent_median,
                 "median_dependent_constraints_per_run": n_dependent_median,
                 "median_observed_independence_tolerance_compatibility_rate": null_compatibility_median,
+                "stage_b_null_compatibility_pass": bool(null_ok),
                 "stage_b_snr": snr_value,
                 "stage_b_snr_source": snr_source,
                 "stage_b_sign_flip_rate": flip_value,
@@ -533,6 +558,15 @@ def main():
         help="Stage A: minimum fraction of constraints recurring across seeds.",
     )
     parser.add_argument(
+        "--min-null-compatibility",
+        type=float,
+        default=DEFAULT_THRESHOLDS["min_null_compatibility"],
+        help=(
+            "Stage B: minimum fraction of independence constraints whose "
+            "observed statistic is within its SE tolerance (null compatibility)."
+        ),
+    )
+    parser.add_argument(
         "--min-window-snr",
         type=float,
         default=DEFAULT_THRESHOLDS["min_window_snr"],
@@ -579,6 +613,7 @@ def main():
     thresholds = {
         "min_constraints": args.min_constraints,
         "min_support_rate": args.min_support_rate,
+        "min_null_compatibility": args.min_null_compatibility,
         "min_window_snr": args.min_window_snr,
         "max_sign_flip_rate": args.max_sign_flip_rate,
         "min_win_rate": args.min_win_rate,
@@ -610,8 +645,9 @@ def main():
         "Gate thresholds: "
         f"A: >= {thresholds['min_constraints']} independent constraints and "
         f">= {thresholds['min_support_rate']:.0%} seed support; "
-        "B: directional-dependence diagnostics only (not applicable to "
-        "independence nulls); "
+        f"B: independence null compatibility >= "
+        f"{thresholds['min_null_compatibility']:.0%}"
+        " (plus directional SNR/sign-flip when dependence constraints exist); "
         f"C: CE-Lite win rate >= {thresholds['min_win_rate']:.0%} over W-only "
         f"with >= {thresholds['min_paired_seeds']} paired seeds."
     )
