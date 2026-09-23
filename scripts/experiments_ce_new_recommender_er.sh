@@ -311,6 +311,43 @@ if [[ "${INCLUDE_W_VARIANTS:-1}" == "1" ]]; then
     "solver.constraint_audit_oracle=synthetic_linear_sem"
 fi
 
+# Capacity x W interaction (INCLUDE_CAPACITY_VARIANTS=0 to skip).  N0/N1 are the
+# default-capacity e0/e1 already.  N2/N3 make the MLP high-variance (wide/deep,
+# dropout 0, weight decay 0, validation off) to test whether W helps a
+# high-variance model.  Verify N2 has lower train and higher test NMSE before
+# calling it high-variance; lr is lowered via HC_HICAP_LR for stability.
+if [[ "${INCLUDE_CAPACITY_VARIANTS:-1}" == "1" ]]; then
+  HICAP=(
+    "solver.hidden_dim=${HC_HICAP_HIDDEN_DIM:-128}"
+    "solver.depth=${HC_HICAP_DEPTH:-3}"
+    "solver.dropout=${HC_HICAP_DROPOUT:-0.0}"
+    "solver.weight_decay=${HC_HICAP_WEIGHT_DECAY:-0.0}"
+    "solver.learning_rate=${HC_HICAP_LR:-0.1}"
+    "solver.use_validation=false"
+    "solver.restore_best_validation_model=false"
+  )
+  run_phase1_synthetic_ce_new "n2_hicap_no_w" \
+    "${COMMON[@]}" \
+    "${LINEAR_SEM[@]}" \
+    "${HICAP[@]}" \
+    "solver.constrained=false" \
+    "solver.recalculate_dag=false" \
+    "solver.use_w_constraints=false" \
+    "solver.use_ci_penalty=false" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+  run_phase1_synthetic_ce_new "n3_hicap_true_w" \
+    "${COMMON[@]}" \
+    "${LINEAR_SEM[@]}" \
+    "${HICAP[@]}" \
+    "solver.constrained=true" \
+    "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
+    "solver.recalculate_dag=false" \
+    "solver.w_matrix_space=raw_sem" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+fi
+
 # Nonlinear ER stress test (INCLUDE_NONLINEAR=0 to skip).  The partial-
 # correlation CE statistic assumes a linear conditional mean, so these arms
 # measure graceful degradation, not correctness.  The synthetic linear oracle
