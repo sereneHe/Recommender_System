@@ -139,88 +139,112 @@ run_ci_audit() {
   done
 }
 
+stage_p0() {
+  echo
+  echo "--- STAGE p0: no-constraint vs legacy global W ---"
+  run_arm "p0_no_constraint" \
+    "${COMMON[@]}" \
+    "solver.constrained=false" \
+    "solver.use_w_constraints=false" \
+    "solver.use_ci_penalty=false" \
+    "solver.constraint_audit_oracle=none"
+  run_arm "p0_legacy_global_w" \
+    "${COMMON[@]}" \
+    "solver.constrained=true" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_constraint_mode=legacy_global" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+}
+
+stage_p1() {
+  echo
+  echo "--- STAGE p1: CI oracle audit + CE-only ---"
+  run_ci_audit
+  run_arm "p1_ce_only" \
+    "${COMMON[@]}" \
+    "${CE_ONLY[@]}"
+}
+
+stage_p1tr() {
+  echo
+  echo "--- STAGE p1_target_residual: target-related W conditional moments (not CE) ---"
+  run_arm "p1tr_target_residual" \
+    "${COMMON[@]}" \
+    "solver.constrained=true" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_constraint_mode=target_residual" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+}
+
+stage_p2() {
+  echo
+  echo "--- STAGE p2: warm-up / constraint-gradient-cap variants ---"
+  run_arm "p2_warmup_ramp" \
+    "${COMMON[@]}" \
+    "solver.constrained=true" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_constraint_mode=target_residual" \
+    "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+    "solver.w_warmup_fraction=${WARMUP_FRACTION:-0.3}" \
+    "solver.w_warmup_ramp_fraction=${WARMUP_RAMP_FRACTION:-0.2}" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+  run_arm "p2_cap_0p1" \
+    "${COMMON[@]}" \
+    "solver.constrained=true" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_constraint_mode=target_residual" \
+    "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+    "solver.w_grad_ratio_cap=0.1" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+  run_arm "p2_cap_0p3" \
+    "${COMMON[@]}" \
+    "solver.constrained=true" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_constraint_mode=target_residual" \
+    "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+    "solver.w_grad_ratio_cap=0.3" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+  run_arm "p2_cap_1p0" \
+    "${COMMON[@]}" \
+    "solver.constrained=true" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_constraint_mode=target_residual" \
+    "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+    "solver.w_grad_ratio_cap=1.0" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+}
+
 case "${STAGE}" in
-  p0)
-    # No-constraint reference vs the legacy global W mean moment.
-    run_arm "p0_no_constraint" \
-      "${COMMON[@]}" \
-      "solver.constrained=false" \
-      "solver.use_w_constraints=false" \
-      "solver.use_ci_penalty=false" \
-      "solver.constraint_audit_oracle=none"
-    run_arm "p0_legacy_global_w" \
-      "${COMMON[@]}" \
-      "solver.constrained=true" \
-      "solver.use_w_constraints=true" \
-      "solver.use_ci_penalty=false" \
-      "solver.w_constraint_mode=legacy_global" \
-      "solver.constraint_audit_oracle=synthetic_linear_sem"
-    ;;
-
-  p1)
-    # Oracle audit of the CE statistics first, then the CE-only training arm.
-    run_ci_audit
-    run_arm "p1_ce_only" \
-      "${COMMON[@]}" \
-      "${CE_ONLY[@]}"
-    ;;
-
-  p1_target_residual)
-    # Target-related W conditional moments.  This is a W constraint form, not CE.
-    run_arm "p1tr_target_residual" \
-      "${COMMON[@]}" \
-      "solver.constrained=true" \
-      "solver.use_w_constraints=true" \
-      "solver.use_ci_penalty=false" \
-      "solver.w_constraint_mode=target_residual" \
-      "solver.constraint_audit_oracle=synthetic_linear_sem"
-    ;;
-
+  p0) stage_p0 ;;
+  p1) stage_p1 ;;
+  p1_target_residual) stage_p1tr ;;
   p2)
     if [[ "${P1_VERIFIED:-0}" != "1" ]]; then
       die "STAGE=p2 requires P1_VERIFIED=1 after reviewing the STAGE=p1 audit and CE-only results."
     fi
-    run_arm "p2_warmup_ramp" \
-      "${COMMON[@]}" \
-      "solver.constrained=true" \
-      "solver.use_w_constraints=true" \
-      "solver.use_ci_penalty=false" \
-      "solver.w_constraint_mode=target_residual" \
-      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-      "solver.w_warmup_fraction=${WARMUP_FRACTION:-0.3}" \
-      "solver.w_warmup_ramp_fraction=${WARMUP_RAMP_FRACTION:-0.2}" \
-      "solver.constraint_audit_oracle=synthetic_linear_sem"
-    run_arm "p2_cap_0p1" \
-      "${COMMON[@]}" \
-      "solver.constrained=true" \
-      "solver.use_w_constraints=true" \
-      "solver.use_ci_penalty=false" \
-      "solver.w_constraint_mode=target_residual" \
-      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-      "solver.w_grad_ratio_cap=0.1" \
-      "solver.constraint_audit_oracle=synthetic_linear_sem"
-    run_arm "p2_cap_0p3" \
-      "${COMMON[@]}" \
-      "solver.constrained=true" \
-      "solver.use_w_constraints=true" \
-      "solver.use_ci_penalty=false" \
-      "solver.w_constraint_mode=target_residual" \
-      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-      "solver.w_grad_ratio_cap=0.3" \
-      "solver.constraint_audit_oracle=synthetic_linear_sem"
-    run_arm "p2_cap_1p0" \
-      "${COMMON[@]}" \
-      "solver.constrained=true" \
-      "solver.use_w_constraints=true" \
-      "solver.use_ci_penalty=false" \
-      "solver.w_constraint_mode=target_residual" \
-      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-      "solver.w_grad_ratio_cap=1.0" \
-      "solver.constraint_audit_oracle=synthetic_linear_sem"
+    stage_p2
     ;;
-
+  all)
+    # Run the reviewable stages in order.  p2 stays gated so a single job does
+    # not silently run the optimization variants before P1 is reviewed.
+    stage_p0
+    stage_p1
+    stage_p1tr
+    if [[ "${P1_VERIFIED:-0}" == "1" ]]; then
+      stage_p2
+    else
+      echo
+      echo "P2 skipped: set P1_VERIFIED=1 (after reviewing the p1 audit) to include it."
+    fi
+    ;;
   *)
-    die "Unknown STAGE=${STAGE}. Use p0, p1, p1_target_residual, or p2."
+    die "Unknown STAGE=${STAGE}. Use p0, p1, p1_target_residual, p2, or all."
     ;;
 esac
 
