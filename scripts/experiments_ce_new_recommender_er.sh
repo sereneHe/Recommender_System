@@ -420,6 +420,11 @@ if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
   # B1/B2: MARK and MARK-CC tree baselines.
   run_phase1_synthetic_tree "b1_mark" "mark" \
     "${LINEAR_SEM[@]}"
+  # A1: same mark config but 100 boosted trees, to separate the tree-count
+  # effect from y-standardization / custom-objective and from the W penalty.
+  run_phase1_synthetic_tree "a1_mark_100" "mark" \
+    "solver.n_estimators=100" \
+    "${LINEAR_SEM[@]}"
   run_phase1_synthetic_tree "b2_mark_with_cc" "mark_with_cc" \
     "solver.n_outer=${N_OUTER}" \
     "solver.time_limit=${TIME_LIMIT}" \
