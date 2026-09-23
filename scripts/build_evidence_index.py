@@ -220,43 +220,79 @@ COMPARISONS = [
      "PLAN_EVIDENCE_PRIORITY_ER_sco_spbm_all", "mechanism", "ce",
      req(use_ci_penalty=True, use_w_constraints=False)),
 
-    # ---- Shared-reference A2/A3/A5 cohort ----
-    ("A2.W_global.shared_ER", "A2", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_nn",
-     "PLAN_EVIDENCE_SHARED_ER_a2_w_global", "mechanism", "w",
-     req(use_w_constraints=True, use_ci_penalty=False)),
-    ("A2.W_target_residual.shared_ER", "A2", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_nn",
-     "PLAN_EVIDENCE_SHARED_ER_a2_w_target_residual", "mechanism", "w",
-     req(use_w_constraints=True, use_ci_penalty=False)),
-    ("A2.W_mask.shared_ER", "A2", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_a2_w_global",
-     "PLAN_EVIDENCE_SHARED_ER_a2_w_mask", "mechanism", "w",
-     req(use_w_constraints=True, use_ci_penalty=False)),
-    ("A2.W_bias_calibration.shared_ER", "A2", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_nn",
-     "PLAN_EVIDENCE_SHARED_ER_a2_w_bias_calibration", "mechanism", "w",
-     req(use_w_constraints=False, use_ci_penalty=False)),
-    ("A2.balanced_batch.shared_ER", "A2", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_ce",
-     "PLAN_EVIDENCE_SHARED_ER_a2_balanced_batch", "mechanism", "none",
-     req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A2.pruning.shared_ER", "A2", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_ce",
-     "PLAN_EVIDENCE_SHARED_ER_a2_pruning", "mechanism", "none",
-     req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A3.covariance.shared_ER", "A3", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_ce",
-     "PLAN_EVIDENCE_SHARED_ER_a3_covariance", "mechanism", "ce",
-     req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A3.window_SE.shared_ER", "A3", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_a3_hac_se",
-     "PLAN_EVIDENCE_SHARED_ER_ref_ce", "mechanism", "ce",
-     req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A3.HAC_SE.shared_ER", "A3", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_ce",
-     "PLAN_EVIDENCE_SHARED_ER_a3_hac_se", "mechanism", "ce",
-     req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A3.sign_flip_filter.shared_ER", "A3", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_dep",
-     "PLAN_EVIDENCE_SHARED_ER_a3_sign_flip_filter", "mechanism", "ce",
-     req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A5.hidden_depth.shared_ER", "A5", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_nn",
-     "PLAN_EVIDENCE_SHARED_ER_a5_hidden_depth", "mechanism", "none", None),
-    ("A5.lr_wd.shared_ER", "A5", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_nn",
-     "PLAN_EVIDENCE_SHARED_ER_a5_lr_wd", "mechanism", "none", None),
-    ("A5.n_outer_inner.shared_ER", "A5", "synthetic/ER", "PLAN_EVIDENCE_SHARED_ER_ref_nn",
-     "PLAN_EVIDENCE_SHARED_ER_a5_n_outer_inner", "mechanism", "none", None),
+    # ---- Field-matched EV:<node>:<arm> comparisons --------------------------
+    # These match the explicit evidence_node/evidence_arm fields written by
+    # scripts/evidence_tree/*.sh, so the builder does not depend on the
+    # experiment-name string.
+    # A1 optimizer backends (ref_ce is alm_pbm = ALM under independent-only).
+    ("A1.ALM_ALL.er", "A1", "synthetic/ER", "EV:ref:ref_ce",
+     "EV:A1.ALM_ALL:ce_alm_all", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    ("A1.PBM_ALL.er", "A1", "synthetic/ER", "EV:ref:ref_ce",
+     "EV:A1.PBM_ALL:ce_pbm_all", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    ("A1.STOCHASTIC_PBM.er", "A1", "synthetic/ER", "EV:A1.PBM_ALL:ce_pbm_all",
+     "EV:A1.STOCHASTIC_PBM:ce_spbm_all", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    ("A1.SCO_LAYER.er", "A1", "synthetic/ER", "EV:A1.STOCHASTIC_PBM:ce_spbm_all",
+     "EV:A1.SCO_LAYER:ce_sco", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    # A2 constraint embedding.
+    ("A2.W_global.er", "A2", "synthetic/ER", "EV:ref:ref_nn",
+     "EV:A2.W_global:w_global", "mechanism", "w", req(use_w_constraints=True, use_ci_penalty=False)),
+    ("A2.W_target_residual.er", "A2", "synthetic/ER", "EV:ref:ref_nn",
+     "EV:A2.W_target_residual:w_target_residual", "mechanism", "w", req(use_w_constraints=True, use_ci_penalty=False)),
+    ("A2.W_mask.er", "A2", "synthetic/ER", "EV:A2.W_global:w_global",
+     "EV:A2.W_mask:w_mask", "mechanism", "w", req(use_w_constraints=True, use_ci_penalty=False)),
+    ("A2.W_bias_calibration.er", "A2", "synthetic/ER", "EV:ref:ref_nn",
+     "EV:A2.W_bias_calibration:w_bias_calibration", "mechanism", "w", req(use_w_constraints=False, use_ci_penalty=False)),
+    ("A2.balanced_batch.er", "A2", "synthetic/ER", "EV:ref:ref_ce",
+     "EV:A2.balanced_batch:ce_balanced_batch", "mechanism", "none", req(use_ci_penalty=True, use_w_constraints=False)),
+    ("A2.pruning.er", "A2", "synthetic/ER", "EV:ref:ref_ce",
+     "EV:A2.pruning:ce_pruning", "mechanism", "none", req(use_ci_penalty=True, use_w_constraints=False)),
+    # A3 CI/CE statistic.
+    ("A3.covariance.er", "A3", "synthetic/ER", "EV:ref:ref_ce",
+     "EV:A3.covariance:ce_covariance", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    ("A3.window_SE.er", "A3", "synthetic/ER", "EV:A3.HAC_SE:ce_hac_se",
+     "EV:A3.window_SE:ce_window_se", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    ("A3.HAC_SE.er", "A3", "synthetic/ER", "EV:A3.window_SE:ce_window_se",
+     "EV:A3.HAC_SE:ce_hac_se", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    ("A3.sign_flip_filter.er", "A3", "synthetic/ER", "EV:A3.sign_flip_filter:dep_filter_off",
+     "EV:A3.sign_flip_filter:dep_filter_on", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
+    # A4 graph estimation & causal prior.
+    ("A4.mip_time.er", "A4", "synthetic/ER", "EV:A4.mip_time:mip_time_ref",
+     "EV:A4.mip_time:mip_time_1800", "mechanism", "graph", req(recalculate_dag=True)),
+    ("A4.mip_gap.er", "A4", "synthetic/ER", "EV:A4.mip_gap:mip_gap_ref",
+     "EV:A4.mip_gap:mip_gap_1e4", "mechanism", "graph", req(recalculate_dag=True)),
+    ("A4.edge_penalty.er", "A4", "synthetic/ER", "EV:A4.edge_penalty:edge_penalty_0",
+     "EV:A4.edge_penalty:edge_penalty_0p05", "mechanism", "graph", req(recalculate_dag=True)),
+    ("A4.parents_limit.er", "A4", "synthetic/ER", "EV:A4.parents_limit:parents_none",
+     "EV:A4.parents_limit:parents_3", "mechanism", "graph", req(recalculate_dag=True)),
+    ("A4.clique_cap.er", "A4", "synthetic/ER", "EV:A4.clique_cap:clique_off",
+     "EV:A4.clique_cap:clique_on", "mechanism", "graph", req(recalculate_dag=True)),
+    # A5 capacity & budget.
+    ("A5.hidden_depth.er", "A5", "synthetic/ER", "EV:ref:ref_nn",
+     "EV:A5.hidden_depth:hicap_64x3", "mechanism", "none", None),
+    ("A5.lr_wd.er", "A5", "synthetic/ER", "EV:ref:ref_nn",
+     "EV:A5.lr_wd:lr0p05_wd0p10", "mechanism", "none", None),
+    ("A5.n_outer_inner.er", "A5", "synthetic/ER", "EV:ref:ref_nn",
+     "EV:A5.n_outer_inner:updates_half_5x50", "mechanism", "budget", None),
+    ("A5.n_outer_inner_matched.er", "A5", "synthetic/ER", "EV:ref:ref_nn",
+     "EV:A5.n_outer_inner:updates_matched_20x50", "mechanism", "budget", None),
+    # A6 data / time / robustness (FRED).
+    ("A6.lag.fred", "A6", "FRED", "EV:ref:fred_ref",
+     "EV:A6.lag:feature_lag_3", "mechanism", "data", None),
+    ("A6.trend.fred", "A6", "FRED", "EV:ref:fred_ref",
+     "EV:A6.trend:add_time_trend", "mechanism", "data", None),
+    ("A6.regime.fred", "A6", "FRED", "EV:ref:fred_ref",
+     "EV:A6.regime:regime_break_2020", "mechanism", "data", None),
+    ("A6.huber.fred", "A6", "FRED", "EV:ref:fred_ref",
+     "EV:A6.huber:huber_loss", "mechanism", "loss", None),
+    # B0 classical baselines.
+    ("B0.mark_100.er", "B0", "synthetic/ER", "EV:B0.mark_10:mark_10",
+     "EV:B0.mark_100:mark_100", "end_to_end", "trees", None),
+    ("B0.mark_cc_100.er", "B0", "synthetic/ER", "EV:B0.mark_cc_10:mark_cc_10",
+     "EV:B0.mark_cc_100:mark_cc_100", "end_to_end", "trees", None),
+    ("B0.hc_nn.er", "B0", "synthetic/ER", "EV:B0.mark_100:mark_100",
+     "EV:B0.hc_nn_no_constraint:hc_nn_no_constraint", "end_to_end", "none", None),
+    ("B0.hc_w_only.er", "B0", "synthetic/ER", "EV:B0.hc_nn_no_constraint:hc_nn_no_constraint",
+     "EV:B0.hc_w_only:hc_w_only", "mechanism", "w", req(use_w_constraints=True, use_ci_penalty=False)),
 ]
 
 
@@ -294,6 +330,9 @@ def main():
         val["evidence_batch_id"] = np.nan
     if "execution_cohort" not in val:
         val["execution_cohort"] = np.nan
+    for col in ("evidence_node", "evidence_arm", "evidence_scope"):
+        if col not in val:
+            val[col] = np.nan
     val["cohort"] = val.apply(cohort_of, axis=1)
 
     now = datetime.now().isoformat(timespec="seconds")
@@ -303,10 +342,27 @@ def main():
         git_commit = ""
 
     pair_rows, idx_rows, excl_rows = [], [], []
+
+    def _select(sub, token):
+        """Resolve an arm token.
+
+        ``EV:<node>:<arm>`` matches the explicit evidence_node/evidence_arm
+        fields written into the problem config, so the builder no longer
+        depends on the experiment-name string.  Any other token is a legacy
+        experiment-name prefix match.
+        """
+        if token.startswith("EV:"):
+            _, node, arm = token.split(":", 2)
+            return sub[
+                (sub.evidence_node.astype(str) == node)
+                & (sub.evidence_arm.astype(str) == arm)
+            ]
+        return sub[sub.arm == token]
+
     for cid, root, scope, ref_arm, cand_arm, ctype, treat, require in COMPARISONS:
         sub = val[val.scope == scope]
-        ref_all = sub[sub.arm == ref_arm]
-        cand_all = sub[sub.arm == cand_arm]
+        ref_all = _select(sub, ref_arm)
+        cand_all = _select(sub, cand_arm)
         if require is not None and len(cand_all):
             keep = require(cand_all)
             # Preserve an auditable record of a misconfigured arm instead of
