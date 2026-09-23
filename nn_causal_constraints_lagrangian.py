@@ -428,9 +428,30 @@ def _fit_aug_lagrangian_nn_constraint_impl(
 
     grad_log_interval = int(getattr(cfg, "gradient_log_interval", 0) or 0)
     grad_conflict_history = []
+    warmup_fraction = float(getattr(cfg, "w_warmup_fraction", 0.0) or 0.0)
+    ramp_fraction = float(getattr(cfg, "w_warmup_ramp_fraction", 0.0) or 0.0)
+    grad_ratio_cap = float(getattr(cfg, "w_grad_ratio_cap", 0.0) or 0.0)
+    total_steps = max(1, int(cfg.n_outer) * int(cfg.n_inner))
+    warmup_steps = int(warmup_fraction * total_steps)
+    ramp_steps = max(1, int(ramp_fraction * total_steps))
+    if warmup_steps or grad_ratio_cap > 0.0:
+        logging.info(
+            "Constraint schedule: warmup=%d/%d steps, ramp=%d steps, grad_ratio_cap=%s",
+            warmup_steps,
+            total_steps,
+            ramp_steps if warmup_steps else 0,
+            grad_ratio_cap,
+        )
     for outer in range(cfg.n_outer):
         g = torch.empty(0, device=device)
         for inner in range(cfg.n_inner):
+            step_index = outer * int(cfg.n_inner) + inner
+            if step_index < warmup_steps:
+                constraint_scale = 0.0
+            elif step_index < warmup_steps + ramp_steps:
+                constraint_scale = (step_index - warmup_steps) / float(ramp_steps)
+            else:
+                constraint_scale = 1.0
             if ce_loader_iter is None:
                 X_batch = X
                 y_batch = y
@@ -447,8 +468,9 @@ def _fit_aug_lagrangian_nn_constraint_impl(
             yhat = model(X_batch)
             mse = loss(yhat, y_batch)
             mse = apply_ci_penalty(mse, cfg, W, X_batch, yhat, _build_ci_constraints_from_cfg)
+            aug_loss = mse
 
-            if cfg.constrained:
+            if cfg.constrained and constraint_scale > 0.0:
                 g_parts = []
                 if use_w_constraints:
                     if w_constraint_mode == "target_residual":
@@ -512,8 +534,13 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                             aug_loss,
                             torch.cat(ce_ineq_parts),
                         )
+                if g_parts and constraint_scale < 1.0:
+                    # Warm-up ramp: scale the whole constraint contribution.
+                    aug_loss = mse + constraint_scale * (aug_loss - mse)
                 if grad_log_interval > 0 and inner % grad_log_interval == 0:
-                    cos, ratio, g_norm = _gradient_conflict(model, mse, aug_loss, g)
+                    cos, ratio, g_norm, applied_scale = _gradient_conflict(
+                        model, mse, aug_loss, g, grad_ratio_cap
+                    )
                     grad_conflict_history.append(
                         {
                             "outer": outer,
@@ -521,9 +548,13 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                             "cos_mse_constraint": cos,
                             "constraint_over_mse": ratio,
                             "constraint_norm": g_norm,
+                            "applied_constraint_scale": applied_scale,
                         }
                     )
-                aug_loss.backward()
+                if grad_ratio_cap > 0.0 and g_parts:
+                    _backward_with_constraint_cap(model, mse, aug_loss, grad_ratio_cap)
+                else:
+                    aug_loss.backward()
             else:
                 if ce_pbm_dual_opt is not None:
                     ce_ineq_parts = []
@@ -666,15 +697,17 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         cos_values = [row["cos_mse_constraint"] for row in grad_conflict_history]
         ratio_values = [row["constraint_over_mse"] for row in grad_conflict_history]
         g_values = [row["constraint_norm"] for row in grad_conflict_history]
+        scale_values = [row.get("applied_constraint_scale", 1.0) for row in grad_conflict_history]
         logging.info(
             "Gradient conflict (n=%d): mean cos(MSE, constraint)=%.4f "
-            "(min %.4f, max %.4f) | mean ||g_constraint||/||g_MSE||=%.4f "
-            "| mean ||g||=%.4e",
+            "(min %.4f, max %.4f) | mean raw ||g_constraint||/||g_MSE||=%.4f "
+            "| mean applied constraint scale=%.4f | mean ||g||=%.4e",
             len(grad_conflict_history),
             _stats.fmean(cos_values),
             min(cos_values),
             max(cos_values),
             _stats.fmean(ratio_values),
+            _stats.fmean(scale_values),
             _stats.fmean(g_values),
         )
     model.best_validation_loss_ = best_val_loss if best_state_dict is not None else None
@@ -724,11 +757,12 @@ def W_constraint(v, g0, y):
     return g
 
 
-def _gradient_conflict(model, mse, aug_loss, constraints):
-    """Cosine and norm ratio between the MSE and constraint gradient directions.
+def _gradient_conflict(model, mse, aug_loss, constraints, cap=0.0):
+    """Cosine, raw norm ratio, ||g|| and the applied constraint-gradient scale.
 
     Diagnostic only: it does not modify the update.  Pair it with the reported
     constraint violation; a small cosine is a warning, not a feasibility proof.
+    ``cap > 0`` reports the scale ``_backward_with_constraint_cap`` would apply.
     """
     params = [p for p in model.parameters() if p.requires_grad]
     grad_mse = torch.autograd.grad(mse, params, retain_graph=True, allow_unused=True)
@@ -748,8 +782,50 @@ def _gradient_conflict(model, mse, aug_loss, constraints):
         else 0.0
     )
     ratio = gc_norm / gm_norm if gm_norm > 1e-12 else 0.0
+    applied_scale = (
+        min(1.0, cap * gm_norm / gc_norm)
+        if cap > 0.0 and gc_norm > 1e-12 and gm_norm > 1e-12
+        else 1.0
+    )
     g_norm = float(torch.linalg.norm(constraints)) if constraints.numel() else 0.0
-    return cos, ratio, g_norm
+    return cos, ratio, g_norm, applied_scale
+
+
+def _backward_with_constraint_cap(model, mse, aug_loss, cap):
+    """Backprop with the constraint gradient capped at ``cap`` x the MSE norm.
+
+    ``aug_loss = mse + constraint_term``; the constraint direction is
+    ``grad(aug_loss) - grad(mse)``.  If its norm exceeds ``cap * ||grad(mse)||``
+    it is rescaled, so an informative but dominant constraint cannot swamp the
+    prediction objective.  cap <= 0 is treated as no cap.
+    """
+    params = [p for p in model.parameters() if p.requires_grad]
+    grad_mse = torch.autograd.grad(mse, params, retain_graph=True, allow_unused=True)
+    grad_aug = torch.autograd.grad(aug_loss, params, retain_graph=True, allow_unused=True)
+    grad_constraint = [
+        (a - m) if (a is not None and m is not None) else (a if a is not None else m)
+        for a, m in zip(grad_aug, grad_mse)
+    ]
+
+    def _norm(grads):
+        parts = [g.reshape(-1) for g in grads if g is not None]
+        return float(torch.cat(parts).norm()) if parts else 0.0
+
+    mse_norm = _norm(grad_mse)
+    constraint_norm = _norm(grad_constraint)
+    if cap > 0.0 and constraint_norm > 1e-12 and mse_norm > 1e-12:
+        scale = min(1.0, cap * mse_norm / constraint_norm)
+    else:
+        scale = 1.0
+    for param, g_mse, g_constraint in zip(params, grad_mse, grad_constraint):
+        total = None
+        if g_mse is not None:
+            total = g_mse.clone()
+        if g_constraint is not None:
+            scaled = g_constraint * scale
+            total = scaled if total is None else total + scaled
+        param.grad = total
+    return scale
 
 
 def _resolve_named_ci_constraints(ci_constraints, current_feature_names, target_name):

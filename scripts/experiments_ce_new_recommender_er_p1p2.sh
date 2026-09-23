@@ -5,8 +5,10 @@
 #   p0_legacy_global          : current global (W-I)[Xbar, Ybar] mean moment;
 #   p1_target_residual        : target-parent conditional moments
 #                               E[phi_k(Pa_Y) * (Yhat - f_W(Pa_Y))] = 0;
-#   p2_target_residual_gradlog: p1 plus per-step gradient-conflict diagnostics
-#                               (cos between MSE and constraint grads, norm ratio, ||g||).
+#   p2_target_residual_gradlog: p1 plus per-step gradient-conflict diagnostics;
+#   p3_warmup_ramp            : p1 + MSE-only warm-up then a constraint ramp;
+#   p4/p5/p6_cap_0p1/0p3/1p0  : p1 + constraint gradient capped at 0.1/0.3/1.0x
+#                               the MSE gradient norm.
 #
 # Compare p1 - p0 (does the conditional residual help?) and read p2's logged
 # cos/ratio to see whether the constraint fights the MSE objective.
@@ -112,6 +114,32 @@ run_arm "p2_target_residual_gradlog" \
   "${COMMON[@]}" \
   "solver.w_constraint_mode=target_residual" \
   "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}"
+
+# P2 optimization variants (all on target_residual, with diagnostics on).
+run_arm "p3_warmup_ramp" \
+  "${COMMON[@]}" \
+  "solver.w_constraint_mode=target_residual" \
+  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+  "solver.w_warmup_fraction=${WARMUP_FRACTION:-0.3}" \
+  "solver.w_warmup_ramp_fraction=${WARMUP_RAMP_FRACTION:-0.2}"
+
+run_arm "p4_cap_0p1" \
+  "${COMMON[@]}" \
+  "solver.w_constraint_mode=target_residual" \
+  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+  "solver.w_grad_ratio_cap=0.1"
+
+run_arm "p5_cap_0p3" \
+  "${COMMON[@]}" \
+  "solver.w_constraint_mode=target_residual" \
+  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+  "solver.w_grad_ratio_cap=0.3"
+
+run_arm "p6_cap_1p0" \
+  "${COMMON[@]}" \
+  "solver.w_constraint_mode=target_residual" \
+  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+  "solver.w_grad_ratio_cap=1.0"
 
 echo
 echo "=== ER P1/P2 complete ==="

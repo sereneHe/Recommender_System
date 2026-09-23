@@ -143,6 +143,16 @@ w_constraint_mode: legacy_global
 # Diagnostic: log cos(grad MSE, grad constraint), ||grad constraint||/||grad MSE||
 # and ||g|| every N inner steps (0 disables).
 gradient_log_interval: 0
+# Optimization controls (applied once the constraint is informative).
+#   w_warmup_fraction: fraction of inner steps that train MSE only before the
+#     constraint is switched on;
+#   w_warmup_ramp_fraction: fraction of steps over which the constraint term is
+#     linearly ramped to full strength after warm-up;
+#   w_grad_ratio_cap: cap ||grad constraint|| at this multiple of ||grad MSE||
+#     (0 disables; e.g. 0.1 / 0.3 / 1.0).
+w_warmup_fraction: 0.0
+w_warmup_ramp_fraction: 0.0
+w_grad_ratio_cap: 0.0
 # ``model_standardized`` is correct for W estimated by the MILP, which fits
 # standardized X/Y. The phase-1 synthetic true-W arm explicitly selects
 # ``raw_sem`` so its known raw SEM coefficients are transformed before use.
