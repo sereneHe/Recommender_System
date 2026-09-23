@@ -113,6 +113,7 @@ def summarize(root, arm_a, arm_b, metric, output, confidence):
         )
     frame = pd.DataFrame(paired)
     output = Path(output).expanduser().resolve() if output else root / "paired_arm_delta.csv"
+    output.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(output, index=False)
 
     summary = {"n_pairs": len(frame), "arm_a": arm_a, "arm_b": arm_b, "metric": metric}
