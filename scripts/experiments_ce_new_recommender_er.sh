@@ -210,6 +210,7 @@ run_phase1_synthetic_tree() {
         "solver.n_runs=${N_RUNS}"
         "solver.recalculate_dag=false"
         "+solver.cv_strategy=site_gender"
+        "+solver.cv_random_state=$((model_seed + 10000))"
         "+solver.cv_time_test_size=null"
         "+solver.cv_time_gap=0"
         "++problem.seed=${graph_seed}"
@@ -306,6 +307,21 @@ if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
   # B1/B2: MARK and MARK-CC tree baselines.
   run_phase1_synthetic_tree "b1_mark" "mark"
   run_phase1_synthetic_tree "b2_mark_with_cc" "mark_with_cc" \
+    "solver.n_outer=${N_OUTER}" \
+    "solver.time_limit=${TIME_LIMIT}" \
+    "+solver.w_matrix_space=raw_sem"
+
+  # M0/M1: fair ablation of the W penalty on the XGB + Lagrangian path.  Both
+  # arms use mark_with_cc's fitting procedure (n_outer x n_estimators = 100
+  # trees, standardized y, same objective/API); M0 sets rho0=0 so the W penalty
+  # and its dual are identically zero.  Only M1 - M0 identifies the effect of
+  # the W graph-moment constraint.
+  run_phase1_synthetic_tree "m0_xgb100_no_w" "mark_with_cc" \
+    "solver.n_outer=${N_OUTER}" \
+    "solver.time_limit=${TIME_LIMIT}" \
+    "solver.rho0=0.0" \
+    "+solver.w_matrix_space=raw_sem"
+  run_phase1_synthetic_tree "m1_xgb100_w" "mark_with_cc" \
     "solver.n_outer=${N_OUTER}" \
     "solver.time_limit=${TIME_LIMIT}" \
     "+solver.w_matrix_space=raw_sem"

@@ -187,6 +187,7 @@ run_phase1_synthetic_tree_baseline() {
         "solver.n_runs=${N_RUNS}"
         "solver.recalculate_dag=false"
         "+solver.cv_strategy=site_gender"
+        "+solver.cv_random_state=$((model_seed + 10000))"
         "+solver.cv_time_test_size=null"
         "+solver.cv_time_gap=0"
         "++problem.seed=${graph_seed}"
