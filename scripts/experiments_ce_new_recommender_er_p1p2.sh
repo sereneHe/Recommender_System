@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
-# P1/P2 driver: target-residual conditional moments and gradient-conflict logging.
+# STAGE-driven driver for the HC-NN-CE program.
 #
-# Arms (all on the synthetic ER generator with the true graph, W only, no CE):
-#   p0_legacy_global          : current global (W-I)[Xbar, Ybar] mean moment;
-#   p1_target_residual        : target-parent conditional moments
-#                               E[phi_k(Pa_Y) * (Yhat - f_W(Pa_Y))] = 0;
-#   p2_target_residual_gradlog: p1 plus per-step gradient-conflict diagnostics;
-#   p3_warmup_ramp            : p1 + MSE-only warm-up then a constraint ramp;
-#   p4/p5/p6_cap_0p1/0p3/1p0  : p1 + constraint gradient capped at 0.1/0.3/1.0x
-#                               the MSE gradient norm.
+# STAGE=p0                  : no-constraint vs the legacy global W moment;
+# STAGE=p1                  : CI-statistic oracle audit + CE-only training arm;
+# STAGE=p1_target_residual  : target-related W conditional moments (NOT CE);
+# STAGE=p2                  : optimization variants; requires P1_VERIFIED=1.
 #
-# Compare p1 - p0 (does the conditional residual help?) and read p2's logged
-# cos/ratio to see whether the constraint fights the MSE objective.
+# Runs on the synthetic ER generator with the true graph (recalculate_dag=false),
+# so the comparison isolates the predictor and the constraint, not the DAG
+# learner.  CoDiet/Industry keep their own type-aware / time-series paths.
 #
-# Usage:
-#   bash scripts/experiments_ce_new_recommender_er_p1p2.sh
-#   DRY_RUN=1 bash scripts/experiments_ce_new_recommender_er_p1p2.sh
+# Local use:
+#   STAGE=p0 bash scripts/experiments_ce_new_recommender_er_p1p2.sh
+#   DRY_RUN=1 STAGE=p1 bash scripts/experiments_ce_new_recommender_er_p1p2.sh
+#
+# PBS use:
+#   qsub -v EXPERIMENT_SCRIPT=scripts/experiments_ce_new_recommender_er_p1p2.sh,STAGE=p0 \
+#     cluster_computing/run_metacentrum.pbs
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
-
-announce_stage "ER-P1P2" "target-residual conditional moments and gradient diagnostics"
 
 GRAPH_SEEDS="${GRAPH_SEEDS:-${SEEDS:-42 43 44}}"
 NOISE_SEEDS="${NOISE_SEEDS:-101}"
@@ -28,6 +27,7 @@ read -r -a PLAN_SEEDS <<< "${SEEDS//,/ }"
 
 PROBLEMS="${PROBLEMS:-synthetic_er}"
 EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-PLAN_CE_NEW_ER_P1P2}"
+STAGE="${STAGE:-p0}"
 TIME_LIMIT="${TIME_LIMIT:-120}"
 N_RUNS="${N_RUNS:-5}"
 N_OUTER="${N_OUTER:-10}"
@@ -37,6 +37,7 @@ N_NODES="${N_NODES:-10}"
 EXPECTED_EDGES="${EXPECTED_EDGES:-15}"
 CE_CONSTRAINT_BACKEND="${CE_CONSTRAINT_BACKEND:-alm_pbm}"
 GRAD_LOG_INTERVAL="${GRAD_LOG_INTERVAL:-10}"
+CI_AUDIT_SEM_TYPES="${CI_AUDIT_SEM_TYPES:-gauss nonlinear}"
 
 export HC_WEIBULL_GAUSSIANIZE=0
 export HC_CE_BD_MCMC="${HC_CE_BD_MCMC:-0}"
@@ -45,6 +46,8 @@ read -r -a CE_NEW_NOISE_SEEDS <<< "${NOISE_SEEDS//,/ }"
 if [[ ${#CE_NEW_NOISE_SEEDS[@]} -eq 0 ]]; then
   die "NOISE_SEEDS must contain at least one integer."
 fi
+
+announce_stage "ER-P1P2" "STAGE=${STAGE}"
 
 COMMON=(
   "solver.time_limit=${TIME_LIMIT}"
@@ -59,12 +62,8 @@ COMMON=(
   "solver.ce_use_balanced_batches=false"
   "solver.ce_batch_size=128"
   "solver.use_stochastic_constrained_optimizer=false"
-  "solver.constrained=true"
   "solver.recalculate_dag=false"
   "solver.w_matrix_space=raw_sem"
-  "solver.use_w_constraints=true"
-  "solver.use_ci_penalty=false"
-  "solver.constraint_audit_oracle=synthetic_linear_sem"
   "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}"
   "++problem.n_samples=${N_SAMPLES}"
   "++problem.n_nodes=${N_NODES}"
@@ -72,10 +71,27 @@ COMMON=(
   "++problem.sem_type=gauss"
 )
 
+CE_ONLY=(
+  "solver.constrained=true"
+  "solver.use_w_constraints=false"
+  "solver.use_ci_penalty=true"
+  "solver.ci_penalty_kind=conditional_expectation"
+  "solver.ce_statistic_kind=partial_correlation"
+  "solver.ce_statistic_shrinkage=0.05"
+  "solver.ce_residualize_method=linear"
+  "solver.ce_se_method=window"
+  "solver.ce_cross_window_n_windows=5"
+  "solver.ce_tolerance_sd_multiplier=1.96"
+  "solver.ci_add_dsep_independence=true"
+  "solver.ci_add_collider_marginal_independence=false"
+  "solver.ci_add_collider_conditional_dependence=false"
+  "solver.ci_add_shielded_collider_dependence=false"
+  "solver.constraint_audit_oracle=synthetic_linear_sem"
+)
+
 run_arm() {
   local label="$1"
   shift 1
-
   local graph_seed noise_seed model_seed
   for graph_seed in "${PLAN_SEEDS[@]}"; do
     [[ "${graph_seed}" =~ ^[0-9]+$ ]] || die "Invalid GRAPH_SEEDS value ${graph_seed}."
@@ -102,44 +118,111 @@ run_arm() {
   done
 }
 
-run_arm "p0_legacy_global" \
-  "${COMMON[@]}" \
-  "solver.w_constraint_mode=legacy_global"
+run_ci_audit() {
+  local sem_type
+  for sem_type in ${CI_AUDIT_SEM_TYPES}; do
+    local out="results/ci_audit/ci_audit_ER_${sem_type}.csv"
+    echo "--- CI statistic oracle audit: ER / ${sem_type} -> ${out} ---"
+    if [[ "${DRY_RUN}" == "1" ]]; then
+      echo "DRY_RUN: would audit ER/${sem_type}"
+      continue
+    fi
+    "${PYTHON_BIN}" scripts/causal_predictor_plan/audit_nonlinear_ci.py \
+      --graph-type ER \
+      --sem-type "${sem_type}" \
+      --graph-seeds ${GRAPH_SEEDS} \
+      --noise-seeds ${NOISE_SEEDS} \
+      --n-samples "${N_SAMPLES}" \
+      --n-nodes "${N_NODES}" \
+      --expected-edges "${EXPECTED_EDGES}" \
+      --output "${out}"
+  done
+}
 
-run_arm "p1_target_residual" \
-  "${COMMON[@]}" \
-  "solver.w_constraint_mode=target_residual"
+case "${STAGE}" in
+  p0)
+    # No-constraint reference vs the legacy global W mean moment.
+    run_arm "p0_no_constraint" \
+      "${COMMON[@]}" \
+      "solver.constrained=false" \
+      "solver.use_w_constraints=false" \
+      "solver.use_ci_penalty=false" \
+      "solver.constraint_audit_oracle=none"
+    run_arm "p0_legacy_global_w" \
+      "${COMMON[@]}" \
+      "solver.constrained=true" \
+      "solver.use_w_constraints=true" \
+      "solver.use_ci_penalty=false" \
+      "solver.w_constraint_mode=legacy_global" \
+      "solver.constraint_audit_oracle=synthetic_linear_sem"
+    ;;
 
-run_arm "p2_target_residual_gradlog" \
-  "${COMMON[@]}" \
-  "solver.w_constraint_mode=target_residual" \
-  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}"
+  p1)
+    # Oracle audit of the CE statistics first, then the CE-only training arm.
+    run_ci_audit
+    run_arm "p1_ce_only" \
+      "${COMMON[@]}" \
+      "${CE_ONLY[@]}"
+    ;;
 
-# P2 optimization variants (all on target_residual, with diagnostics on).
-run_arm "p3_warmup_ramp" \
-  "${COMMON[@]}" \
-  "solver.w_constraint_mode=target_residual" \
-  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-  "solver.w_warmup_fraction=${WARMUP_FRACTION:-0.3}" \
-  "solver.w_warmup_ramp_fraction=${WARMUP_RAMP_FRACTION:-0.2}"
+  p1_target_residual)
+    # Target-related W conditional moments.  This is a W constraint form, not CE.
+    run_arm "p1tr_target_residual" \
+      "${COMMON[@]}" \
+      "solver.constrained=true" \
+      "solver.use_w_constraints=true" \
+      "solver.use_ci_penalty=false" \
+      "solver.w_constraint_mode=target_residual" \
+      "solver.constraint_audit_oracle=synthetic_linear_sem"
+    ;;
 
-run_arm "p4_cap_0p1" \
-  "${COMMON[@]}" \
-  "solver.w_constraint_mode=target_residual" \
-  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-  "solver.w_grad_ratio_cap=0.1"
+  p2)
+    if [[ "${P1_VERIFIED:-0}" != "1" ]]; then
+      die "STAGE=p2 requires P1_VERIFIED=1 after reviewing the STAGE=p1 audit and CE-only results."
+    fi
+    run_arm "p2_warmup_ramp" \
+      "${COMMON[@]}" \
+      "solver.constrained=true" \
+      "solver.use_w_constraints=true" \
+      "solver.use_ci_penalty=false" \
+      "solver.w_constraint_mode=target_residual" \
+      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+      "solver.w_warmup_fraction=${WARMUP_FRACTION:-0.3}" \
+      "solver.w_warmup_ramp_fraction=${WARMUP_RAMP_FRACTION:-0.2}" \
+      "solver.constraint_audit_oracle=synthetic_linear_sem"
+    run_arm "p2_cap_0p1" \
+      "${COMMON[@]}" \
+      "solver.constrained=true" \
+      "solver.use_w_constraints=true" \
+      "solver.use_ci_penalty=false" \
+      "solver.w_constraint_mode=target_residual" \
+      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+      "solver.w_grad_ratio_cap=0.1" \
+      "solver.constraint_audit_oracle=synthetic_linear_sem"
+    run_arm "p2_cap_0p3" \
+      "${COMMON[@]}" \
+      "solver.constrained=true" \
+      "solver.use_w_constraints=true" \
+      "solver.use_ci_penalty=false" \
+      "solver.w_constraint_mode=target_residual" \
+      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+      "solver.w_grad_ratio_cap=0.3" \
+      "solver.constraint_audit_oracle=synthetic_linear_sem"
+    run_arm "p2_cap_1p0" \
+      "${COMMON[@]}" \
+      "solver.constrained=true" \
+      "solver.use_w_constraints=true" \
+      "solver.use_ci_penalty=false" \
+      "solver.w_constraint_mode=target_residual" \
+      "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
+      "solver.w_grad_ratio_cap=1.0" \
+      "solver.constraint_audit_oracle=synthetic_linear_sem"
+    ;;
 
-run_arm "p5_cap_0p3" \
-  "${COMMON[@]}" \
-  "solver.w_constraint_mode=target_residual" \
-  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-  "solver.w_grad_ratio_cap=0.3"
-
-run_arm "p6_cap_1p0" \
-  "${COMMON[@]}" \
-  "solver.w_constraint_mode=target_residual" \
-  "solver.gradient_log_interval=${GRAD_LOG_INTERVAL}" \
-  "solver.w_grad_ratio_cap=1.0"
+  *)
+    die "Unknown STAGE=${STAGE}. Use p0, p1, p1_target_residual, or p2."
+    ;;
+esac
 
 echo
-echo "=== ER P1/P2 complete ==="
+echo "=== ER P1P2 STAGE=${STAGE} complete ==="
