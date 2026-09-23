@@ -223,6 +223,7 @@ run_phase1_synthetic_tree() {
   done
 }
 
+if [[ "${INCLUDE_MAIN:-1}" == "1" ]]; then
 # E0: no-constraint baseline with the same network/validation path.
 run_phase1_synthetic_ce_new "e0_no_constraint" \
   "${COMMON[@]}" \
@@ -293,6 +294,25 @@ if [[ "${INCLUDE_NONLINEAR:-1}" == "1" ]]; then
     "solver.use_w_constraints=false" \
     "solver.use_ci_penalty=false" \
     "solver.constraint_audit_oracle=none"
+fi
+fi
+
+# Nonlinear ER method baselines (INCLUDE_NONLINEAR_BASELINES=1).  These answer
+# whether the classical methods keep their ranking on the nonlinear generator;
+# mark_with_cc's W moment is misspecified there (nonlinear mean).
+if [[ "${INCLUDE_NONLINEAR_BASELINES:-0}" == "1" ]]; then
+  HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
+  run_phase1_synthetic_nn_baseline "b0nl_hc_predictor_${HC_BASELINE_BACKEND}" "hc_predictor" "${HC_BASELINE_BACKEND}" \
+    "${BASELINE_NN_COMMON[@]}" \
+    "++problem.sem_type=nonlinear" \
+    "solver.constraint_audit_oracle=none"
+  run_phase1_synthetic_tree "b1nl_mark" "mark" \
+    "++problem.sem_type=nonlinear"
+  run_phase1_synthetic_tree "b2nl_mark_with_cc" "mark_with_cc" \
+    "solver.n_outer=${N_OUTER}" \
+    "solver.time_limit=${TIME_LIMIT}" \
+    "++problem.sem_type=nonlinear" \
+    "+solver.w_matrix_space=raw_sem"
 fi
 
 # Method baselines (INCLUDE_BASELINES=0 to skip).  Conventions follow
