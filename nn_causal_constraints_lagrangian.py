@@ -472,7 +472,16 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                             torch.cat(ce_ineq_parts),
                         )
                 mse.backward()
+            step_loss = aug_loss if cfg.constrained else mse
+            if not torch.isfinite(step_loss).all():
+                # A non-finite loss would poison every weight for the rest of
+                # the outer loop; skip this step instead of propagating NaN.
+                optimizer.zero_grad()
+                continue
             stochastic_opt.apply_prox_gradient(model)
+            clip_norm = float(getattr(cfg, "grad_clip_norm", 0.0) or 0.0)
+            if clip_norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
             optimizer.step()
             stochastic_opt.update_prox_center(model)
 

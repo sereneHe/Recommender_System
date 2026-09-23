@@ -35,6 +35,10 @@ weight_decay: 0.25
 # Optimization loss; prediction reporting remains raw MSE/NMSE.
 prediction_loss: mse
 huber_delta: 1.0
+# Cap the per-step gradient norm.  A bounded exact multiplier is still applied
+# for stability, so this only matters when a constrained arm would otherwise
+# diverge to NaN.  Set 0 to disable.
+grad_clip_norm: 5.0
 
 #EXDBN parameters
 # DAG solver backend.  The historical implementation remains the default;
