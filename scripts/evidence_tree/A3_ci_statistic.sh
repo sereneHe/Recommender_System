@@ -18,7 +18,8 @@ EV_SCOPE="synthetic/ER"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 announce_stage "A3" "CI/CE statistic (batch=${EVIDENCE_BATCH_ID})"
 
-# ref_ce: partial correlation, window SE, sign-flip filter explicitly OFF.
+# ref_ce IS the window-SE arm (EV_CE_BASE sets ce_se_method=window), so it
+# doubles as the A3.window_SE reference; no separate window arm is run.
 run_arm "ref" "ref_ce" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
   "solver.ce_window_filter_enabled=false"
 
@@ -27,10 +28,7 @@ run_arm "A3.covariance" "ce_covariance" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
   "solver.ce_window_filter_enabled=false" \
   "solver.ce_statistic_kind=covariance"
 
-# A3.window_SE vs A3.HAC_SE: identical except the standard-error method.
-run_arm "A3.window_SE" "ce_window_se" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
-  "solver.ce_window_filter_enabled=false" "solver.ce_se_method=window"
-
+# A3.HAC_SE: one single window-vs-HAC contrast (ref = ref_ce = window).
 run_arm "A3.HAC_SE" "ce_hac_se" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
   "solver.ce_window_filter_enabled=false" \
   "solver.ce_se_method=hac" "solver.ce_hac_max_lag=6"

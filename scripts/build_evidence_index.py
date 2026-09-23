@@ -249,21 +249,26 @@ COMPARISONS = [
     # A3 CI/CE statistic.
     ("A3.covariance.er", "A3", "synthetic/ER", "EV:ref:ref_ce",
      "EV:A3.covariance:ce_covariance", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A3.window_SE.er", "A3", "synthetic/ER", "EV:A3.HAC_SE:ce_hac_se",
-     "EV:A3.window_SE:ce_window_se", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
-    ("A3.HAC_SE.er", "A3", "synthetic/ER", "EV:A3.window_SE:ce_window_se",
+    # Single window-vs-HAC contrast (ref_ce is the window arm); the previous
+    # two reverse-direction entries double-counted the same comparison.
+    ("A3.window_vs_hac.er", "A3", "synthetic/ER", "EV:ref:ref_ce",
      "EV:A3.HAC_SE:ce_hac_se", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
     ("A3.sign_flip_filter.er", "A3", "synthetic/ER", "EV:A3.sign_flip_filter:dep_filter_off",
      "EV:A3.sign_flip_filter:dep_filter_on", "mechanism", "ce", req(use_ci_penalty=True, use_w_constraints=False)),
-    # A4 graph estimation & causal prior.
-    ("A4.mip_time.er", "A4", "synthetic/ER", "EV:A4.mip_time:mip_time_ref",
+    # A4 graph estimation & causal prior.  One shared MIP control arm serves
+    # both the time and the gap contrast.
+    ("A4.mip_time.er", "A4", "synthetic/ER", "EV:A4.mip_control:mip_control",
      "EV:A4.mip_time:mip_time_1800", "mechanism", "graph", req(recalculate_dag=True)),
-    ("A4.mip_gap.er", "A4", "synthetic/ER", "EV:A4.mip_gap:mip_gap_ref",
+    ("A4.mip_gap.er", "A4", "synthetic/ER", "EV:A4.mip_control:mip_control",
      "EV:A4.mip_gap:mip_gap_1e4", "mechanism", "graph", req(recalculate_dag=True)),
     ("A4.edge_penalty.er", "A4", "synthetic/ER", "EV:A4.edge_penalty:edge_penalty_0",
      "EV:A4.edge_penalty:edge_penalty_0p05", "mechanism", "graph", req(recalculate_dag=True)),
-    ("A4.parents_limit.er", "A4", "synthetic/ER", "EV:A4.parents_limit:parents_none",
+    ("A4.parents_limit_3.er", "A4", "synthetic/ER", "EV:A4.parents_limit:parents_none",
      "EV:A4.parents_limit:parents_3", "mechanism", "graph", req(recalculate_dag=True)),
+    ("A4.parents_limit_4.er", "A4", "synthetic/ER", "EV:A4.parents_limit:parents_none",
+     "EV:A4.parents_limit:parents_4", "mechanism", "graph", req(recalculate_dag=True)),
+    ("A4.parents_limit_5.er", "A4", "synthetic/ER", "EV:A4.parents_limit:parents_none",
+     "EV:A4.parents_limit:parents_5", "mechanism", "graph", req(recalculate_dag=True)),
     ("A4.clique_cap.er", "A4", "synthetic/ER", "EV:A4.clique_cap:clique_off",
      "EV:A4.clique_cap:clique_on", "mechanism", "graph", req(recalculate_dag=True)),
     # A5 capacity & budget.
@@ -418,6 +423,9 @@ def main():
             cluster_vals: dict[str, list[float]] = {}
             excluded = 0
             expected_clusters = set()
+            ref_ch = cand_ch = ""
+            nh_used = "n/a"
+            nh_equal = False
             for nh in strata:
                 ref_clusters = {k[2] for k in rs if k[0] == cohort and k[1] == nh}
                 cand_clusters = {k[2] for k in cs if k[0] == cohort and k[1] == nh}
@@ -448,6 +456,10 @@ def main():
                         continue
                     rel = (rv - cv) / rv
                     cluster_vals.setdefault(cl, []).append(rel)
+                    ref_ch = str(rr.resolved_config_hash)
+                    cand_ch = str(cc.resolved_config_hash)
+                    nh_used = nh
+                    nh_equal = True
                     pair_rows.append(dict(
                         comparison_id=cid, node_id=cid, scope_id=scope, root=root,
                         cohort=cohort,
@@ -502,6 +514,9 @@ def main():
                 n_clusters_used=n_clusters, n_excluded=excluded, power=power,
                 rel_improvement=rel_mean, ci_lo=lo, ci_hi=hi,
                 statistical_win=stat_win, practical_win=prac_win, status=status,
+                reference_config_hash=ref_ch, candidate_config_hash=cand_ch,
+                nuisance_config_hash=nh_used, nuisance_hash_equal=nh_equal,
+                split_hash_equal=False, fold_w_cache_hash_equal=False,
                 note=(f"{ctype}; cohort+nuisance stratified; practical>={PRACTICAL:.0%}"),
                 updated_at=now))
 

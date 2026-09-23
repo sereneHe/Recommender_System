@@ -128,6 +128,13 @@ run_arm() {
         "++problem.graph_seed=${graph_seed}"
         "++problem.noise_seed=${noise_seed}"
       )
+      # Tree solvers (mark / mark_with_cc) do not declare cv_random_state, so
+      # append it with '+' to keep their CV split matched to the HC arms.
+      case "${EV_SOLVER:-hc_predictor_ce}" in
+        mark|mark_with_cc)
+          seed_overrides+=("+solver.cv_random_state=$((model_seed + 10000))")
+          ;;
+      esac
       if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
         run_hydra "${EXPERIMENT_PREFIX}_${label}_graph${graph_seed}_noise${noise_seed}" \
           "${EV_SOLVER:-hc_predictor_ce}" "${PROBLEMS}" "${seed_overrides[@]}" "$@" \

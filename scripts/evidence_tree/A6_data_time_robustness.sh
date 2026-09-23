@@ -12,11 +12,12 @@
 
 EV_AXIS="A6"
 EV_SCOPE="FRED"
+# PROBLEMS and the prefix must be set BEFORE sourcing _common.sh, otherwise the
+# synthetic_er default wins and this cohort silently runs synthetic data.
+PROBLEMS="${PROBLEMS:-FRED_16country_monthly/industry_eu_ita}"
+EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-ET_A6_FRED}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 announce_stage "A6" "data / time / robustness (batch=${EVIDENCE_BATCH_ID})"
-
-PROBLEMS="${PROBLEMS:-FRED_16country_monthly/industry_eu_ita}"
-APPEND_VALIDATION="${APPEND_VALIDATION:-0}"
 
 FRED_COMMON=(
   "solver.time_limit=${TIME_LIMIT}"
@@ -48,6 +49,7 @@ FRED_COMMON=(
   "solver.cv_time_gap=${CV_TIME_GAP:-0}"
   "solver.validation_split_strategy=time"
   "solver.prediction_loss=mse"
+  "++problem.evidence_batch_id=${EVIDENCE_BATCH_ID}"
 )
 
 # Shared reference: default data representation, MSE loss.

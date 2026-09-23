@@ -24,7 +24,6 @@ TREE_SEED=(
   "solver.n_runs=${N_RUNS}"
   "solver.recalculate_dag=false"
   "+solver.cv_strategy=site_gender"
-  "+solver.cv_random_state=10000"
   "+solver.cv_time_test_size=null"
   "+solver.cv_time_gap=0"
 )

@@ -36,19 +36,21 @@ DAG_FIXED=(
   "solver.nonzero_threshold=0.001"
   "solver.loss_type=l2" "solver.reg_type=l2" "solver.a_reg_type=l1"
   "solver.constraints_mode=weights"
-  "solver.constraint_audit_oracle=none"
 )
-CE_DAG=("${EV_CE_BASE[@]}" "solver.constrained=true")
+# CE_DAG ends with constraint_audit_oracle=none so it is NOT overwritten by
+# EV_CE_BASE's synthetic_linear_sem (a real ER graph is estimated here, so the
+# true-SEM oracle does not apply).
+CE_DAG=("${EV_CE_BASE[@]}" "solver.constrained=true" "solver.constraint_audit_oracle=none")
+
+# --- shared MIP control: one arm serves both the time and the gap contrast ---
+run_arm "A4.mip_control" "mip_control" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
+  "solver.time_limit=120" "solver.target_mip_gap=0.01"
 
 # --- A4.mip_time: only the time limit changes (gap fixed at 0.01) ---
-run_arm "A4.mip_time" "mip_time_ref" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
-  "solver.time_limit=120" "solver.target_mip_gap=0.01"
 run_arm "A4.mip_time" "mip_time_1800" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
   "solver.time_limit=1800" "solver.target_mip_gap=0.01"
 
 # --- A4.mip_gap: only the gap changes (time fixed at 120) ---
-run_arm "A4.mip_gap" "mip_gap_ref" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
-  "solver.time_limit=120" "solver.target_mip_gap=0.01"
 run_arm "A4.mip_gap" "mip_gap_1e4" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
   "solver.time_limit=120" "solver.target_mip_gap=0.0001"
 

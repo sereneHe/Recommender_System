@@ -61,7 +61,7 @@ NODES = [
     ("B0", "S0", "B0", "B0 基线轨（可比较的 fallback）", "Baseline rail (comparable fallback)",
      "evidence", False, N(HC), []),
     ("B0.mark_100", "B0", "B0", "B0.1 Mark-100", "Mark-100", "evidence", False,
-     lambda d: d.experiment.str.contains("mark_100", na=False), ["B0.mark_100.er"]),
+     lambda d: d.experiment.str.contains("mark_100", na=False), ["B0.tree_count.ER", "B0.mark_100.er"]),
     ("B0.mark_cc_total100", "B0", "B0", "B0.2 Mark-CC（总预算 100 树，待模型产物核验）",
      "Mark-CC (total-100 budget; pending model-artifact audit)", "code", False,
      lambda d: d.solver.eq("mark_with_cc"), ["B0.mark_cc_100.er"]),
@@ -133,10 +133,10 @@ NODES = [
      eq("ci_penalty_kind", "discrete_conditional_independence"), []),
     ("A3.quantile_residual", "A3", "A3", "A3.4 分位残差化", "quantile residualization", "code", True,
      eq("ce_residualize_method", "quantile"), ["P1.3.quantile_vs_linear.ER", "P1.3.quantile_vs_linear.repair_ER"]),
-    ("A3.window_SE", "A3", "A3", "A3.5 window SE", "window SE", "code", True, eq("ce_se_method", "window"), ["A3.window_SE.er"]),
-    ("A3.HAC_SE", "A3", "A3", "A3.6 HAC SE", "HAC SE", "code", True, eq("ce_se_method", "hac"), ["A3.HAC_SE.er"]),
+    ("A3.window_SE", "A3", "A3", "A3.5 window SE", "window SE", "code", True, eq("ce_se_method", "window"), ["A3.window_vs_hac.er"]),
+    ("A3.HAC_SE", "A3", "A3", "A3.6 HAC SE", "HAC SE", "code", True, eq("ce_se_method", "hac"), ["A3.window_vs_hac.er"]),
     ("A3.sign_flip_filter", "A3", "A3", "A3.7 sign-flip filter", "sign-flip filter", "code", True,
-     lambda d: d.ce_window_max_sign_flip_rate.notna() & d.ce_window_max_sign_flip_rate.ne(""), ["A3.sign_flip_filter.er"]),
+     lambda d: d.ce_window_filter_enabled.astype(str).str.lower().eq("true"), ["A3.sign_flip_filter.er"]),
     ("A3.KCI_HSIC", "A3", "A3", "A3.8 KCI/HSIC（非线性 CI）", "KCI/HSIC (nonlinear CI)", "literature", True,
      lambda d: pd.Series(False, index=d.index), []),
 
@@ -145,12 +145,14 @@ NODES = [
     ("A4.edge_penalty", "A4", "A4", "A4.1 edge penalty", "edge penalty", "code", True,
      lambda d: pd.to_numeric(d.edge_penalty, errors="coerce").fillna(0) > 0, ["A4.edge_penalty.er"]),
     ("A4.parents_limit", "A4", "A4", "A4.2 max parents", "parents limit", "code", True,
-     lambda d: pd.to_numeric(d.max_parents, errors="coerce").fillna(0) > 0, ["A4.parents_limit.er"]),
+     lambda d: pd.to_numeric(d.max_parents, errors="coerce").fillna(0) > 0,
+     ["A4.parents_limit_3.er", "A4.parents_limit_4.er", "A4.parents_limit_5.er"]),
     ("A4.clique_cap", "A4", "A4", "A4.3 clique cap", "clique cap", "code", True,
      lambda d: d.enable_clique_constraints.astype(str).str.lower().eq("true"), ["A4.clique_cap.er"]),
     ("A4.MIP_time_gap", "A4", "A4", "A4.4 MIP time / gap", "MIP time/gap", "code", True,
      lambda d: pd.to_numeric(d.time_limit, errors="coerce").eq(1800)
-               | pd.to_numeric(d.target_mip_gap, errors="coerce").eq(0.01), []),
+               | pd.to_numeric(d.target_mip_gap, errors="coerce").eq(0.01),
+     ["A4.mip_time.er", "A4.mip_gap.er"]),
     ("A4.stability_selection", "A4", "A4", "A4.5 stability selection", "stability selection", "literature", True,
      lambda d: pd.Series(False, index=d.index), []),
     ("A4.non_gaussian_moments", "A4", "A4", "A4.6 高阶矩 / 非高斯先验", "higher moments / non-Gaussian",
@@ -196,7 +198,7 @@ NODES = [
     ("G0.3_exact_split_hash", "G0", "G0", "G0.3 exact split hash", "exact split hash", "code", False,
      lambda d: pd.Series(False, index=d.index), []),
     ("G0.4_nuisance_config_hash", "G0", "G0", "G0.4 nuisance config hash", "nuisance config hash", "code", False,
-     lambda d: pd.Series(True, index=d.index), []),
+     lambda d: pd.Series(False, index=d.index), []),
     ("G0.5_fold_W_cache_hash", "G0", "G0", "G0.5 fold-W cache hash", "fold-W cache hash", "code", False,
      lambda d: pd.Series(False, index=d.index), []),
     ("G0.6_frozen_selection_receipt", "G0", "G0", "G0.6 frozen selection receipt", "frozen selection receipt",
@@ -220,7 +222,9 @@ LITERATURE_ONLY = {"A3.KCI_HSIC", "A4.stability_selection", "A4.non_gaussian_mom
 NOT_IMPL_GATES = {"G0.3_exact_split_hash", "G0.5_fold_W_cache_hash", "G0.6_frozen_selection_receipt", "F0"}
 OVERRIDE_CLAIM = {
     "B0.mark_cc_total100": "open_hard_gate",
-    "A1.HYBRID_ALM_PBM": "implemented_unverified",
+    "A1.ALM_ALL": "pending_pairing",
+    "A1.PBM_ALL": "pending_pairing",
+    "A1.HYBRID_ALM_PBM": "inactive_under_independence_only",
     "A1.STOCHASTIC_PBM": "open",
     "A1.SCO_LAYER": "open",
     "A4.graph_quality": "implemented_unverified",
@@ -228,7 +232,10 @@ OVERRIDE_CLAIM = {
     "A4.solver_stability": "implemented_unverified",
     "G0.1_metric_schema_valid": "checker_implemented",
     "G0.2_complete_artifact": "checker_implemented",
-    "G0.4_nuisance_config_hash": "checker_implemented",
+    "G0.3_exact_split_hash": "open_hard_gate",
+    "G0.4_nuisance_config_hash": "not_verified",
+    "G0.5_fold_W_cache_hash": "open_hard_gate",
+    "G0.6_frozen_selection_receipt": "open_hard_gate",
 }
 
 
@@ -265,6 +272,13 @@ for nid, parent, axis, zh, en, source, crossed, fn, comps in NODES:
     u = count(fn, runs)
     vr = count(fn, valid)
     claim, paired, ev = comp_claim(comps)
+    # G0 receipt gates read evidence_index receipts, not run counts
+    RECEIPT_COL = {"G0.3_exact_split_hash": "split_hash_equal",
+                   "G0.4_nuisance_config_hash": "nuisance_hash_equal",
+                   "G0.5_fold_W_cache_hash": "fold_w_cache_hash_equal"}
+    if nid in RECEIPT_COL:
+        col = RECEIPT_COL[nid]
+        u = vr = int((idx[col].astype(str).str.lower() == "true").sum()) if col in idx.columns else 0
     if source == "literature":
         impl = "hypothesis"
         if claim == "-":
@@ -284,6 +298,12 @@ for nid, parent, axis, zh, en, source, crossed, fn, comps in NODES:
         impl = "not_implemented"
     if nid in OVERRIDE_CLAIM:
         claim = OVERRIDE_CLAIM[nid]
+    elif (claim and "out_of_scope" in claim and impl == "implemented"
+          and "supported" not in claim and "contradicted" not in claim
+          and "equivalent" not in claim and "invalid" not in claim):
+        # every referenced comparison is a not-yet-run planned spec -> do not
+        # report out_of_scope; report implementation / pairing state instead
+        claim = "pending_pairing" if axis == "A1" else "implemented_unverified"
     psub = pooled[pooled.comparison_id.isin(comps)].copy() if comps else pooled.iloc[0:0]
     if len(psub):
         # deterministic: the FIRST declared comparison, never the max-effect one
@@ -295,10 +315,36 @@ for nid, parent, axis, zh, en, source, crossed, fn, comps in NODES:
         pooled_units = int(pd.to_numeric(top.pooled_units, errors="coerce") or 0)
     else:
         pooled_rel = float("nan"); pooled_dir = "-"; pooled_units = 0
+
+    # #4/#5: keep the cohort identity and a per-cohort (legacy/repair) verdict
+    # on every node, instead of collapsing all cohorts into one label.
+    sub_idx = idx[idx.comparison_id.isin(comps)] if comps else idx.iloc[0:0]
+    if len(sub_idx):
+        cohorts = "; ".join(sorted({str(c) for c in sub_idx.cohort if str(c).strip()}))
+        cohort_claims = "; ".join(
+            f"{str(r.cohort)[:20] or 'n/a'}={r.status}" for r in sub_idx.itertuples())
+    else:
+        cohorts = ""; cohort_claims = ""
+
+    # #9: modifier nodes report constraint / SE receipts, not an NMSE claim
+    METRIC_NODES = {"A3.window_SE", "A3.HAC_SE", "A3.sign_flip_filter", "A3.quantile_residual",
+                    "A2.balanced_batch", "A2.pruning"}
+    metrics = ""
+    if nid in METRIC_NODES:
+        try:
+            sel = valid[fn(valid)] if len(valid) else runs.iloc[0:0]
+            metrics = (f"n={len(sel)}; "
+                       f"mean_indep={pd.to_numeric(sel.indep_constraints, errors='coerce').mean():.1f}; "
+                       f"mean_dep={pd.to_numeric(sel.dep_constraints, errors='coerce').mean():.1f}; "
+                       f"mean_signflip={pd.to_numeric(sel.ce_window_max_sign_flip_rate, errors='coerce').mean():.2f}")
+        except Exception:
+            metrics = ""
+
     rows.append(dict(node_id=nid, parent=parent, axis=axis, zh=zh, en=en, source=source,
                      crossed_factor=crossed, implementation=impl, evidence=ev, claim=claim,
                      unique_runs=u, valid_runs=vr, paired_units=paired,
                      pooled_rel=pooled_rel, pooled_direction=pooled_dir, pooled_units=pooled_units,
+                     cohorts=cohorts, cohort_claims=cohort_claims, metrics=metrics,
                      comparison_ids=";".join(comps), literature=LIT.get(nid, "")))
 
 out = pd.DataFrame(rows)

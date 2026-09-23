@@ -22,14 +22,17 @@ EV_SCOPE="synthetic/ER"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 announce_stage "A1" "optimizer backends (batch=${EVIDENCE_BATCH_ID})"
 
-# Shared CE reference is alm_pbm (independent-only -> ALM today).
+# Shared CE reference is alm_pbm (independent-only -> ALM today), so
+# A1.ALM_ALL is mostly a routing sanity check rather than an optimizer contrast.
 run_ref_ce
 
 run_arm "A1.ALM_ALL" "ce_alm_all" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
   "solver.ce_constraint_backend=alm_all"
 
+# Deterministic PBM backend (EV_CE_BASE already picks stochastic_pbm, so
+# without this override PBM_ALL and STOCHASTIC_PBM would be identical runs).
 run_arm "A1.PBM_ALL" "ce_pbm_all" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
-  "solver.ce_constraint_backend=pbm_all"
+  "solver.ce_constraint_backend=pbm_all" "solver.ce_pbm_backend=humancompatible_pbm"
 
 run_arm "A1.STOCHASTIC_PBM" "ce_spbm_all" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
   "solver.ce_constraint_backend=pbm_all" "solver.ce_pbm_backend=stochastic_pbm"
