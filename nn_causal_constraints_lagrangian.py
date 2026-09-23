@@ -295,9 +295,41 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         n_ce_pbm_constraints += len(ce_dependent_constraints)
     elif ce_backend == "pbm_all":
         n_ce_pbm_constraints += len(ce_independent_constraints) + len(ce_dependent_constraints)
-    n_w_constraints = d + 1 if use_w_constraints else 0
+    # W mean-moment components.  In g = (W-I)[Xbar, Ybar], only the rows whose
+    # prediction coefficient M[:, target] is non-zero can be changed by the
+    # predictor; the remaining rows are fixed X-only moment residuals that the
+    # model cannot repair.  Optionally feed only the prediction-dependent rows
+    # to the ALM and record the rest as graph diagnostics.
+    M = W - torch.eye(d + 1, device=device)
+    muX = X.mean(dim=0)
+    g0 = M[:, :-1] @ muX
+    v = M[:, -1]
+    w_mask_eps = float(getattr(cfg, "w_prediction_dependent_eps", 1e-8))
+    w_masking = bool(getattr(cfg, "w_prediction_dependent_mask", False))
+    if use_w_constraints and w_masking:
+        w_rows_mask = torch.abs(v) > w_mask_eps
+    else:
+        w_rows_mask = torch.ones_like(v, dtype=torch.bool)
+    if use_w_constraints and not bool(w_rows_mask.any()):
+        logging.warning(
+            "All W rows have |M[:, target]| <= %s, so the graph moment does not "
+            "depend on predictions; disabling the W ALM constraint.",
+            w_mask_eps,
+        )
+        use_w_constraints = False
+    if use_w_constraints and w_masking:
+        logging.info(
+            "W prediction-dependent mask: kept %d/%d rows (eps=%s); dropped rows "
+            "(X-only moment residuals): %s",
+            int(w_rows_mask.sum().item()),
+            d + 1,
+            w_mask_eps,
+            torch.nonzero(~w_rows_mask).flatten().detach().cpu().tolist(),
+        )
+    n_w_constraints = int(w_rows_mask.sum().item()) if use_w_constraints else 0
     model.w_constraint_enabled_ = use_w_constraints
     model.w_constraint_matrix_ = W.detach().cpu().numpy().copy()
+    model.w_prediction_dependent_mask_ = w_rows_mask.detach().cpu().numpy()
 
     dual_opt = ALM(
         m=n_w_constraints + n_ce_alm_constraints,
@@ -317,12 +349,6 @@ def _fit_aug_lagrangian_nn_constraint_impl(
             len(ce_independent_constraints),
             len(ce_dependent_constraints),
         )
-
-    # Precompute constraint components
-    M = W - torch.eye(d + 1, device=device)
-    muX = X.mean(dim=0)
-    g0 = M[:, :-1] @ muX
-    v = M[:, -1]
 
     if torch.allclose(v, torch.zeros_like(v)):
         if use_w_constraints:
@@ -391,7 +417,7 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                 g_parts = []
                 if use_w_constraints:
                     g0_batch = M[:, :-1] @ X_batch.mean(dim=0)
-                    g_parts.append(W_constraint(v, g0_batch, yhat))
+                    g_parts.append(W_constraint(v, g0_batch, yhat)[w_rows_mask])
                 if ce_backend in {"alm_pbm", "alm_all"} and ce_independent_constraints:
                     ce_eq = independent_expectation_equalities(
                         X_batch,
@@ -551,6 +577,31 @@ def _fit_aug_lagrangian_nn_constraint_impl(
             best_outer,
             best_val_loss,
         )
+    if bool(getattr(cfg, "w_bias_calibration", False)):
+        # No-retrain mean-calibration control: pick the intercept that zeroes the
+        # prediction-dependent W moment on the training data.  If this recovers
+        # most of the W-ALM effect, then the ALM was mostly a mean shift.
+        was_training = model.training
+        model.eval()
+        with torch.no_grad():
+            yhat_mean = model(X).mean()
+            g_cur = g0 + v * yhat_mean
+            denom = float((v * v).sum())
+            if denom > 1e-12:
+                delta = -float((v * g_cur).sum()) / denom
+                final_layer = model.net[-1]
+                if hasattr(final_layer, "bias") and final_layer.bias is not None:
+                    final_layer.bias.add_(delta)
+                model.w_calibration_delta_ = delta
+                post = g0 + v * (yhat_mean + delta)
+                logging.info(
+                    "W bias calibration: delta=%.6g | ||g|| %.3e -> %.3e",
+                    delta,
+                    float(torch.linalg.norm(g_cur)),
+                    float(torch.linalg.norm(post)),
+                )
+        model.train(was_training)
+
     model.validation_history_ = validation_history
     model.best_validation_loss_ = best_val_loss if best_state_dict is not None else None
     model.best_validation_outer_ = best_outer

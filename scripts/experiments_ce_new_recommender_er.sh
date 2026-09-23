@@ -73,7 +73,16 @@ COMMON=(
   "++problem.n_samples=${N_SAMPLES}"
   "++problem.n_nodes=${N_NODES}"
   "++problem.expected_edges=${EXPECTED_EDGES}"
+)
+
+# Keep the SEM type explicit for every arm.  In particular, do not add a
+# nonlinear override after a Gaussian override: the resolved Hydra config must
+# contain one unambiguous generator type for a seed-matched comparison.
+LINEAR_SEM=(
   "++problem.sem_type=gauss"
+)
+NONLINEAR_SEM=(
+  "++problem.sem_type=nonlinear"
 )
 
 # Upgraded CE defaults.  ER is iid with n=1000, so we use low shrinkage,
@@ -121,7 +130,6 @@ BASELINE_NN_COMMON=(
   "++problem.n_samples=${N_SAMPLES}"
   "++problem.n_nodes=${N_NODES}"
   "++problem.expected_edges=${EXPECTED_EDGES}"
-  "++problem.sem_type=gauss"
 )
 
 run_phase1_synthetic_ce_new() {
@@ -227,6 +235,7 @@ if [[ "${INCLUDE_MAIN:-1}" == "1" ]]; then
 # E0: no-constraint baseline with the same network/validation path.
 run_phase1_synthetic_ce_new "e0_no_constraint" \
   "${COMMON[@]}" \
+  "${LINEAR_SEM[@]}" \
   "solver.constrained=false" \
   "solver.recalculate_dag=false" \
   "solver.use_w_constraints=false" \
@@ -236,6 +245,7 @@ run_phase1_synthetic_ce_new "e0_no_constraint" \
 # E1: true-W reference (the upper bound of one-shot moment constraints).
 run_phase1_synthetic_ce_new "e1_true_w" \
   "${COMMON[@]}" \
+  "${LINEAR_SEM[@]}" \
   "solver.constrained=true" \
   "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
   "solver.recalculate_dag=false" \
@@ -247,14 +257,59 @@ run_phase1_synthetic_ce_new "e1_true_w" \
 # E2: upgraded pure-CE (partial correlation, shrinkage, window SE tolerance).
 run_phase1_synthetic_ce_new "e2_pure_ce_upgraded" \
   "${COMMON[@]}" \
+  "${LINEAR_SEM[@]}" \
   "${CE_COMMON[@]}" \
   "solver.use_w_constraints=false"
 
 # E3: W + upgraded CE (the recommended production arm).
 run_phase1_synthetic_ce_new "e3_w_plus_ce_upgraded" \
   "${COMMON[@]}" \
+  "${LINEAR_SEM[@]}" \
   "${CE_COMMON[@]}" \
   "solver.use_w_constraints=true"
+
+# W-variant ablation (INCLUDE_W_VARIANTS=0 to skip).  Tests whether the legacy
+# global W mean-moment adds anything beyond a prediction-dependent mean shift.
+if [[ "${INCLUDE_W_VARIANTS:-1}" == "1" ]]; then
+  # W1: ALM only on prediction-dependent W rows (target-local moments).
+  run_phase1_synthetic_ce_new "w1_true_w_masked" \
+    "${COMMON[@]}" \
+    "${LINEAR_SEM[@]}" \
+    "solver.constrained=true" \
+    "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
+    "solver.recalculate_dag=false" \
+    "solver.w_matrix_space=raw_sem" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_prediction_dependent_mask=true" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+
+  # W2: no-retrain mean calibration only (no W ALM).
+  run_phase1_synthetic_ce_new "w2_true_w_calib_only" \
+    "${COMMON[@]}" \
+    "${LINEAR_SEM[@]}" \
+    "solver.constrained=true" \
+    "solver.recalculate_dag=false" \
+    "solver.w_matrix_space=raw_sem" \
+    "solver.use_w_constraints=false" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_bias_calibration=true" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+
+  # W3: masked W ALM plus the calibration intercept.
+  run_phase1_synthetic_ce_new "w3_true_w_masked_calib" \
+    "${COMMON[@]}" \
+    "${LINEAR_SEM[@]}" \
+    "solver.constrained=true" \
+    "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
+    "solver.recalculate_dag=false" \
+    "solver.w_matrix_space=raw_sem" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.w_prediction_dependent_mask=true" \
+    "solver.w_bias_calibration=true" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+fi
 
 # Nonlinear ER stress test (INCLUDE_NONLINEAR=0 to skip).  The partial-
 # correlation CE statistic assumes a linear conditional mean, so these arms
@@ -265,14 +320,14 @@ if [[ "${INCLUDE_NONLINEAR:-1}" == "1" ]]; then
   run_phase1_synthetic_ce_new "e4_nonlinear_pure_ce" \
     "${COMMON[@]}" \
     "${CE_COMMON[@]}" \
-    "++problem.sem_type=nonlinear" \
+    "${NONLINEAR_SEM[@]}" \
     "solver.use_w_constraints=false" \
     "solver.constraint_audit_oracle=none"
 
   run_phase1_synthetic_ce_new "e5_nonlinear_quantile_ce" \
     "${COMMON[@]}" \
     "${CE_COMMON[@]}" \
-    "++problem.sem_type=nonlinear" \
+    "${NONLINEAR_SEM[@]}" \
     "solver.ce_residualize_method=quantile" \
     "solver.use_w_constraints=false" \
     "solver.constraint_audit_oracle=none"
@@ -280,7 +335,7 @@ if [[ "${INCLUDE_NONLINEAR:-1}" == "1" ]]; then
   run_phase1_synthetic_ce_new "e6_nonlinear_w_plus_ce" \
     "${COMMON[@]}" \
     "${CE_COMMON[@]}" \
-    "++problem.sem_type=nonlinear" \
+    "${NONLINEAR_SEM[@]}" \
     "solver.use_w_constraints=true" \
     "solver.constraint_audit_oracle=none"
 
@@ -288,7 +343,7 @@ if [[ "${INCLUDE_NONLINEAR:-1}" == "1" ]]; then
   # cannot be separated from the harder nonlinear target itself.
   run_phase1_synthetic_ce_new "e7_nonlinear_no_constraint" \
     "${COMMON[@]}" \
-    "++problem.sem_type=nonlinear" \
+    "${NONLINEAR_SEM[@]}" \
     "solver.constrained=false" \
     "solver.recalculate_dag=false" \
     "solver.use_w_constraints=false" \
@@ -304,14 +359,14 @@ if [[ "${INCLUDE_NONLINEAR_BASELINES:-0}" == "1" ]]; then
   HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
   run_phase1_synthetic_nn_baseline "b0nl_hc_predictor_${HC_BASELINE_BACKEND}" "hc_predictor" "${HC_BASELINE_BACKEND}" \
     "${BASELINE_NN_COMMON[@]}" \
-    "++problem.sem_type=nonlinear" \
+    "${NONLINEAR_SEM[@]}" \
     "solver.constraint_audit_oracle=none"
   run_phase1_synthetic_tree "b1nl_mark" "mark" \
-    "++problem.sem_type=nonlinear"
+    "${NONLINEAR_SEM[@]}"
   run_phase1_synthetic_tree "b2nl_mark_with_cc" "mark_with_cc" \
     "solver.n_outer=${N_OUTER}" \
     "solver.time_limit=${TIME_LIMIT}" \
-    "++problem.sem_type=nonlinear" \
+    "${NONLINEAR_SEM[@]}" \
     "+solver.w_matrix_space=raw_sem"
 fi
 
@@ -322,13 +377,16 @@ if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
   # B0: HC NN predictor with the true W moment (ALM by default, no CE).
   HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
   run_phase1_synthetic_nn_baseline "b0_hc_predictor_${HC_BASELINE_BACKEND}" "hc_predictor" "${HC_BASELINE_BACKEND}" \
-    "${BASELINE_NN_COMMON[@]}"
+    "${BASELINE_NN_COMMON[@]}" \
+    "${LINEAR_SEM[@]}"
 
   # B1/B2: MARK and MARK-CC tree baselines.
-  run_phase1_synthetic_tree "b1_mark" "mark"
+  run_phase1_synthetic_tree "b1_mark" "mark" \
+    "${LINEAR_SEM[@]}"
   run_phase1_synthetic_tree "b2_mark_with_cc" "mark_with_cc" \
     "solver.n_outer=${N_OUTER}" \
     "solver.time_limit=${TIME_LIMIT}" \
+    "${LINEAR_SEM[@]}" \
     "+solver.w_matrix_space=raw_sem"
 
   # M0/M1: fair ablation of the W penalty on the XGB + Lagrangian path.  Both
@@ -340,10 +398,12 @@ if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
     "solver.n_outer=${N_OUTER}" \
     "solver.time_limit=${TIME_LIMIT}" \
     "solver.rho0=0.0" \
+    "${LINEAR_SEM[@]}" \
     "+solver.w_matrix_space=raw_sem"
   run_phase1_synthetic_tree "m1_xgb100_w" "mark_with_cc" \
     "solver.n_outer=${N_OUTER}" \
     "solver.time_limit=${TIME_LIMIT}" \
+    "${LINEAR_SEM[@]}" \
     "+solver.w_matrix_space=raw_sem"
 fi
 

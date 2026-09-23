@@ -126,6 +126,16 @@ ci_dependent_statistic: signed
 constraint_audit_enabled: false
 constraint_audit_oracle: none
 use_w_constraints: true
+# W mean-moment variant controls.
+#   w_prediction_dependent_mask: keep only the W rows whose prediction
+#     coefficient |(W-I)[:, target]| > eps in the ALM; the rest are X-only
+#     moment residuals the predictor cannot change (logged as diagnostics).
+#   w_bias_calibration: after training, add the no-retrain intercept that
+#     zeroes the prediction-dependent W moment.  This is a mean-calibration
+#     control for the claim that the W ALM acts mostly as a mean shift.
+w_prediction_dependent_mask: false
+w_prediction_dependent_eps: 1.0e-8
+w_bias_calibration: false
 # ``model_standardized`` is correct for W estimated by the MILP, which fits
 # standardized X/Y. The phase-1 synthetic true-W arm explicitly selects
 # ``raw_sem`` so its known raw SEM coefficients are transformed before use.
