@@ -295,41 +295,65 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         n_ce_pbm_constraints += len(ce_dependent_constraints)
     elif ce_backend == "pbm_all":
         n_ce_pbm_constraints += len(ce_independent_constraints) + len(ce_dependent_constraints)
-    # W mean-moment components.  In g = (W-I)[Xbar, Ybar], only the rows whose
-    # prediction coefficient M[:, target] is non-zero can be changed by the
-    # predictor; the remaining rows are fixed X-only moment residuals that the
-    # model cannot repair.  Optionally feed only the prediction-dependent rows
-    # to the ALM and record the rest as graph diagnostics.
+    # W constraint components.  "legacy_global" is the full (W-I)[Xbar, Ybar]
+    # mean moment; "target_residual" replaces it with target-parent conditional
+    # moments E[phi_k(Pa_Y) * (Yhat - f_W(Pa_Y))] = 0, which vary with the input
+    # region instead of only shifting the global mean prediction.
     M = W - torch.eye(d + 1, device=device)
     muX = X.mean(dim=0)
     g0 = M[:, :-1] @ muX
     v = M[:, -1]
     w_mask_eps = float(getattr(cfg, "w_prediction_dependent_eps", 1e-8))
     w_masking = bool(getattr(cfg, "w_prediction_dependent_mask", False))
-    if use_w_constraints and w_masking:
-        w_rows_mask = torch.abs(v) > w_mask_eps
-    else:
-        w_rows_mask = torch.ones_like(v, dtype=torch.bool)
-    if use_w_constraints and not bool(w_rows_mask.any()):
-        logging.warning(
-            "All W rows have |M[:, target]| <= %s, so the graph moment does not "
-            "depend on predictions; disabling the W ALM constraint.",
-            w_mask_eps,
+    w_constraint_mode = str(getattr(cfg, "w_constraint_mode", "legacy_global")).strip().lower()
+    if w_constraint_mode not in {"legacy_global", "target_residual"}:
+        raise ValueError(
+            "w_constraint_mode must be 'legacy_global' or 'target_residual', "
+            f"got {w_constraint_mode!r}."
         )
-        use_w_constraints = False
-    if use_w_constraints and w_masking:
+    target_index = d
+    target_parents = []
+    target_parent_coefs = torch.zeros(0, device=device)
+    if use_w_constraints and w_constraint_mode == "target_residual":
+        target_parents = [
+            i for i in range(d) if abs(float(W[i, target_index])) > w_mask_eps
+        ]
+        if target_parents:
+            target_parent_coefs = W[target_parents, target_index]
+        w_rows_mask = torch.ones(d + 1, dtype=torch.bool, device=device)
+        n_w_constraints = 1 + len(target_parents)
         logging.info(
-            "W prediction-dependent mask: kept %d/%d rows (eps=%s); dropped rows "
-            "(X-only moment residuals): %s",
-            int(w_rows_mask.sum().item()),
-            d + 1,
-            w_mask_eps,
-            torch.nonzero(~w_rows_mask).flatten().detach().cpu().tolist(),
+            "W target_residual mode: target=%d parents=%s (n_constraints=%d)",
+            target_index,
+            target_parents,
+            n_w_constraints,
         )
-    n_w_constraints = int(w_rows_mask.sum().item()) if use_w_constraints else 0
+    else:
+        if use_w_constraints and w_masking:
+            w_rows_mask = torch.abs(v) > w_mask_eps
+        else:
+            w_rows_mask = torch.ones_like(v, dtype=torch.bool)
+        if use_w_constraints and not bool(w_rows_mask.any()):
+            logging.warning(
+                "All W rows have |M[:, target]| <= %s, so the graph moment does not "
+                "depend on predictions; disabling the W ALM constraint.",
+                w_mask_eps,
+            )
+            use_w_constraints = False
+        if use_w_constraints and w_masking:
+            logging.info(
+                "W prediction-dependent mask: kept %d/%d rows (eps=%s); dropped rows "
+                "(X-only moment residuals): %s",
+                int(w_rows_mask.sum().item()),
+                d + 1,
+                w_mask_eps,
+                torch.nonzero(~w_rows_mask).flatten().detach().cpu().tolist(),
+            )
+        n_w_constraints = int(w_rows_mask.sum().item()) if use_w_constraints else 0
     model.w_constraint_enabled_ = use_w_constraints
     model.w_constraint_matrix_ = W.detach().cpu().numpy().copy()
     model.w_prediction_dependent_mask_ = w_rows_mask.detach().cpu().numpy()
+    model.w_constraint_mode_ = w_constraint_mode
 
     dual_opt = ALM(
         m=n_w_constraints + n_ce_alm_constraints,
@@ -350,14 +374,23 @@ def _fit_aug_lagrangian_nn_constraint_impl(
             len(ce_dependent_constraints),
         )
 
-    if torch.allclose(v, torch.zeros_like(v)):
+    if w_constraint_mode == "legacy_global" and torch.allclose(v, torch.zeros_like(v)):
         if use_w_constraints:
             raise ValueError("Constraint does not depend on predictions.")
     if use_w_constraints:
-        logging.info(
-            "W mean-moment diagnostic on model-standardized training data: %s",
-            W_constraint(v, g0, y),
-        )
+        if w_constraint_mode == "legacy_global":
+            logging.info(
+                "W constraint diagnostic on model-standardized training data (legacy_global): %s",
+                W_constraint(v, g0, y),
+            )
+        else:
+            logging.info(
+                "W constraint mode=%s (target=%d parents=%s); the legacy global "
+                "vector is not the active constraint.",
+                w_constraint_mode,
+                target_index,
+                target_parents,
+            )
     else:
         logging.info("W/DAG constraints disabled by use_w_constraints=false.")
     if bool(getattr(cfg, "ci_log_constraints", True)):
@@ -393,9 +426,11 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         ce_loader = None
     ce_loader_iter = iter(ce_loader) if ce_loader is not None else None
 
+    grad_log_interval = int(getattr(cfg, "gradient_log_interval", 0) or 0)
+    grad_conflict_history = []
     for outer in range(cfg.n_outer):
         g = torch.empty(0, device=device)
-        for _ in range(cfg.n_inner):
+        for inner in range(cfg.n_inner):
             if ce_loader_iter is None:
                 X_batch = X
                 y_batch = y
@@ -416,8 +451,18 @@ def _fit_aug_lagrangian_nn_constraint_impl(
             if cfg.constrained:
                 g_parts = []
                 if use_w_constraints:
-                    g0_batch = M[:, :-1] @ X_batch.mean(dim=0)
-                    g_parts.append(W_constraint(v, g0_batch, yhat)[w_rows_mask])
+                    if w_constraint_mode == "target_residual":
+                        if target_parents:
+                            parent_term = X_batch[:, target_parents] @ target_parent_coefs
+                        else:
+                            parent_term = torch.zeros_like(yhat)
+                        r_y = yhat - parent_term
+                        phi = [torch.ones_like(r_y)]
+                        phi += [X_batch[:, p] for p in target_parents]
+                        g_parts.append(torch.stack([(phi_k * r_y).mean() for phi_k in phi]))
+                    else:
+                        g0_batch = M[:, :-1] @ X_batch.mean(dim=0)
+                        g_parts.append(W_constraint(v, g0_batch, yhat)[w_rows_mask])
                 if ce_backend in {"alm_pbm", "alm_all"} and ce_independent_constraints:
                     ce_eq = independent_expectation_equalities(
                         X_batch,
@@ -467,6 +512,17 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                             aug_loss,
                             torch.cat(ce_ineq_parts),
                         )
+                if grad_log_interval > 0 and inner % grad_log_interval == 0:
+                    cos, ratio, g_norm = _gradient_conflict(model, mse, aug_loss, g)
+                    grad_conflict_history.append(
+                        {
+                            "outer": outer,
+                            "inner": inner,
+                            "cos_mse_constraint": cos,
+                            "constraint_over_mse": ratio,
+                            "constraint_norm": g_norm,
+                        }
+                    )
                 aug_loss.backward()
             else:
                 if ce_pbm_dual_opt is not None:
@@ -603,6 +659,24 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         model.train(was_training)
 
     model.validation_history_ = validation_history
+    model.gradient_conflict_history_ = grad_conflict_history
+    if grad_conflict_history:
+        import statistics as _stats
+
+        cos_values = [row["cos_mse_constraint"] for row in grad_conflict_history]
+        ratio_values = [row["constraint_over_mse"] for row in grad_conflict_history]
+        g_values = [row["constraint_norm"] for row in grad_conflict_history]
+        logging.info(
+            "Gradient conflict (n=%d): mean cos(MSE, constraint)=%.4f "
+            "(min %.4f, max %.4f) | mean ||g_constraint||/||g_MSE||=%.4f "
+            "| mean ||g||=%.4e",
+            len(grad_conflict_history),
+            _stats.fmean(cos_values),
+            min(cos_values),
+            max(cos_values),
+            _stats.fmean(ratio_values),
+            _stats.fmean(g_values),
+        )
     model.best_validation_loss_ = best_val_loss if best_state_dict is not None else None
     model.best_validation_outer_ = best_outer
     model.restore_best_validation_model_ = restore_best_validation_model
@@ -648,6 +722,34 @@ def W_constraint(v, g0, y):
         y = y.unsqueeze(1)
     g = g0 + y.mean(axis=0) * v
     return g
+
+
+def _gradient_conflict(model, mse, aug_loss, constraints):
+    """Cosine and norm ratio between the MSE and constraint gradient directions.
+
+    Diagnostic only: it does not modify the update.  Pair it with the reported
+    constraint violation; a small cosine is a warning, not a feasibility proof.
+    """
+    params = [p for p in model.parameters() if p.requires_grad]
+    grad_mse = torch.autograd.grad(mse, params, retain_graph=True, allow_unused=True)
+    grad_aug = torch.autograd.grad(aug_loss, params, retain_graph=True, allow_unused=True)
+
+    def _flat(grads):
+        parts = [g.reshape(-1) for g in grads if g is not None]
+        return torch.cat(parts) if parts else torch.zeros(1, device=params[0].device)
+
+    gm = _flat(grad_mse)
+    gc = _flat(grad_aug) - gm
+    gm_norm = float(gm.norm())
+    gc_norm = float(gc.norm())
+    cos = (
+        float((gm @ gc) / (gm_norm * gc_norm))
+        if gm_norm > 1e-12 and gc_norm > 1e-12
+        else 0.0
+    )
+    ratio = gc_norm / gm_norm if gm_norm > 1e-12 else 0.0
+    g_norm = float(torch.linalg.norm(constraints)) if constraints.numel() else 0.0
+    return cos, ratio, g_norm
 
 
 def _resolve_named_ci_constraints(ci_constraints, current_feature_names, target_name):

@@ -136,6 +136,13 @@ use_w_constraints: true
 w_prediction_dependent_mask: false
 w_prediction_dependent_eps: 1.0e-8
 w_bias_calibration: false
+# W constraint form.  "legacy_global" is the full (W-I)[Xbar, Ybar] mean moment;
+# "target_residual" uses target-parent conditional moments
+# E[phi_k(Pa_Y) * (Yhat - f_W(Pa_Y))] = 0 with phi in {1} U Pa_Y.
+w_constraint_mode: legacy_global
+# Diagnostic: log cos(grad MSE, grad constraint), ||grad constraint||/||grad MSE||
+# and ||g|| every N inner steps (0 disables).
+gradient_log_interval: 0
 # ``model_standardized`` is correct for W estimated by the MILP, which fits
 # standardized X/Y. The phase-1 synthetic true-W arm explicitly selects
 # ``raw_sem`` so its known raw SEM coefficients are transformed before use.
