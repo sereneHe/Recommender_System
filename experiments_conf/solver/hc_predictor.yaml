@@ -23,6 +23,10 @@ n_outer: 10
 n_inner: 100
 hidden_dim: 32
 depth: 2
+# Dropout between hidden layers.  Increase capacity / lower this (and
+# weight_decay) to create a deliberately overfitting predictor for the
+# "does a moment constraint help a high-variance model?" test.
+dropout: 0.15
 
 constrained: true
 rho0: 1.0

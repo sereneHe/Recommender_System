@@ -167,7 +167,7 @@ class StochasticConstrainedOptimizerState:
 # ------------------------------------------------------------
 
 class MLPRegressor(nn.Module):
-    def __init__(self, input_dim, hidden_dim, depth):
+    def __init__(self, input_dim, hidden_dim, depth, dropout=0.15):
         super().__init__()
         layers = []
 
@@ -175,7 +175,7 @@ class MLPRegressor(nn.Module):
         for i in range(depth):
             dim = hidden_dim//(i+1)
             layers.append(nn.Linear(d, dim))
-            layers.append(nn.Dropout(p=0.15)),
+            layers.append(nn.Dropout(p=dropout)),
             layers.append(nn.ReLU())
             d = dim
 
@@ -241,6 +241,7 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         input_dim=d,
         hidden_dim=cfg.hidden_dim,
         depth=cfg.depth,
+        dropout=float(getattr(cfg, "dropout", 0.15)),
     ).to(device)
 
     optimizer = MoreauEnvelope(
