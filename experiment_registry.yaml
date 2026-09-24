@@ -52,6 +52,34 @@ hypotheses:
     seed_table_hash: "4cbc61cf2716b82e09c00ed5899319afcb912c2d97ecad920b2e9ea5437c5536"
     allow_diagnostic_only: false
 
+  # A8: does the NN's inductive bias beat a fixed XGB reference when the TRUE
+  # conditional mean is smooth/continuous rather than small linear ER?  This is
+  # a NEW axis with its own scopes; it never merges with linear ER evidence.
+  # (Numbered A8 because A7 is CoDiet's type-matched-constraint axis.)
+  A8:
+    id: A8.nn_vs_xgb.SmoothER
+    title: "NN vs fixed XGB-100 on a smooth nonlinear (tanh/sin/softplus) SEM"
+    scope: synthetic/SmoothER
+    comparison_type: end_to_end
+    treatment: none
+    reference_arm: "EV:A8:xgb100"
+    candidate_arm: "EV:A8:nn0"
+    primary_metric: nmse
+    effect_metric: relative_improvement
+    practical_threshold: 0.05
+    strong_threshold: 0.05
+    min_independent_units: 15
+    unit_definition: graph_x_noise
+    # Same split required; no W/DAG is used by either arm, so there is no
+    # fold-W nuisance to share.
+    split_contract: same
+    fold_w_contract: none
+    seed_table:
+      graph_seeds: [42, 43, 44, 45, 46]
+      noise_seeds: [101, 102, 103]
+    seed_table_hash: "385381feedc1362ae3dfc5bb586849dafc814e84a96c1f82c0ecddce2ba8c6e8"
+    allow_diagnostic_only: false
+
   F0:
     id: F0.locked_holdout.ER
     title: "Locked holdout for the frozen ER configuration"

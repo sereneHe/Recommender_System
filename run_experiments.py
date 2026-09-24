@@ -91,20 +91,46 @@ def start_experiment(cfg: DictConfig) -> None:
             #from sachs_utils import load_data
             prep_data = sachs_utils.load_data(cfg.problem.variant, cfg.problem.normalize, cfg.problem.data_path)
         if cfg.problem.name == "synthetic":
-            from synthetic_utils import load_data as load_synthetic_data
+            mechanism = str(cfg.problem.get("synthetic_mechanism", "linear") or "linear")
+            if mechanism != "linear":
+                from synthetic_utils import simulate_synthetic_problem, save_synthetic_artifacts
 
-            prep_data, w_est = load_synthetic_data(
-                n_samples=cfg.problem.n_samples,
-                n_nodes=cfg.problem.n_nodes,
-                expected_edges=cfg.problem.expected_edges,
-                graph_type=cfg.problem.graph_type,
-                sem_type=cfg.problem.get("sem_type", "gauss"),
-                noise_scale=cfg.problem.get("noise_scale", 1.0),
-                noise_df=cfg.problem.get("noise_df", 5.0),
-                seed=cfg.problem.seed,
-                graph_seed=cfg.problem.get("graph_seed", None),
-                noise_seed=cfg.problem.get("noise_seed", None),
-            )
+                prep_data, w_est, oracle_fn, gen_meta = simulate_synthetic_problem(
+                    graph_type=cfg.problem.graph_type,
+                    n_samples=cfg.problem.n_samples,
+                    n_nodes=cfg.problem.n_nodes,
+                    expected_edges=cfg.problem.expected_edges,
+                    mechanism=mechanism,
+                    graph_seed=int(cfg.problem.get("graph_seed") or cfg.problem.seed),
+                    noise_seed=int(cfg.problem.get("noise_seed") or cfg.problem.seed),
+                    sem_type=cfg.problem.get("sem_type", "gauss"),
+                    noise_scale=cfg.problem.get("noise_scale", 1.0),
+                    noise_df=cfg.problem.get("noise_df", 5.0),
+                )
+                artifacts = save_synthetic_artifacts(
+                    output_dir, prep_data, w_est, oracle_fn, gen_meta)
+                for _p in artifacts.values():
+                    mlflow.log_artifact(_p)
+                logger.info("Synthetic mechanism=%s oracle artifacts saved", mechanism)
+            else:
+                from synthetic_utils import load_data as load_synthetic_data
+
+                prep_data, w_est = load_synthetic_data(
+                    n_samples=cfg.problem.n_samples,
+                    n_nodes=cfg.problem.n_nodes,
+                    expected_edges=cfg.problem.expected_edges,
+                    graph_type=cfg.problem.graph_type,
+                    sem_type=cfg.problem.get("sem_type", "gauss"),
+                    noise_scale=cfg.problem.get("noise_scale", 1.0),
+                    noise_df=cfg.problem.get("noise_df", 5.0),
+                    seed=cfg.problem.seed,
+                    graph_seed=cfg.problem.get("graph_seed", None),
+                    noise_seed=cfg.problem.get("noise_seed", None),
+                    mechanism="linear",
+                )
+                true_w_path = join(output_dir, "W_true.csv")
+                np.savetxt(true_w_path, w_est, delimiter=",")
+                mlflow.log_artifact(true_w_path)
             expected_columns = list(cfg.problem.features) + [cfg.problem.target]
             if list(prep_data.columns) != expected_columns:
                 raise ValueError(
@@ -112,9 +138,6 @@ def start_experiment(cfg: DictConfig) -> None:
                     f"expected {expected_columns}, got {list(prep_data.columns)}."
                 )
             row_and_col_names = list(prep_data.columns)
-            true_w_path = join(output_dir, "W_true.csv")
-            np.savetxt(true_w_path, w_est, delimiter=",")
-            mlflow.log_artifact(true_w_path)
         if cfg.problem.name in ["cds", "Sachs"]:
             with zipfile.ZipFile(join(cfg.problem.data_path, "W_est.csv.zip")) as z:
                 with z.open(f"W_est_{cfg.problem.name}.csv") as f:

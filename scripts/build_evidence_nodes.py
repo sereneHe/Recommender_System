@@ -131,6 +131,23 @@ SYN_ER_NONLIN = lambda d: d.problem.eq("synthetic") & d.graph_type.eq("ER") & d.
 FRED = lambda d: d.problem.eq("industry_eu")
 
 
+def SYN_MECH(mech: str):
+    """Guard for one A8 synthetic mechanism (by problem.synthetic_mechanism)."""
+    def f(d):
+        if not _has_col(d, "synthetic_mechanism"):
+            return pd.Series(False, index=d.index)
+        col = d.synthetic_mechanism.astype(str)
+        return d.problem.eq("synthetic") & col.eq(str(mech))
+    return f
+
+
+def A8_ANY(d):
+    if not _has_col(d, "synthetic_mechanism"):
+        return pd.Series(False, index=d.index)
+    col = d.synthetic_mechanism.astype(str)
+    return d.problem.eq("synthetic") & ~col.isin(("", "nan", "None", "linear"))
+
+
 def _has_col(d, col):
     try:
         return col in d.columns
@@ -293,6 +310,25 @@ NODES = [
     ("H1.ce_vs_nn", "H1", "H1", "H1.1 CE-only vs 匹配 NN（20 graph×noise）", "CE-only vs matched NN (20 graph x noise)",
      "evidence", False, H1_RUNS, ["H1.ce_vs_nn.ER"]),
 
+    # ---------- A8 NN-favourable mechanisms ----------
+    ("A8", "S0", "A8", "A8 NN 有利的数据机制与规模", "NN-favourable mechanisms and scale",
+     "evidence", False, A8_ANY, []),
+    ("A8.smooth_er", "A8", "A8", "A8.1 平滑非线性 ER（tanh/sin/softplus）", "Smooth nonlinear ER",
+     "evidence", False, SYN_MECH("smooth_additive"),
+     ["A8.smooth.nn_vs_xgb", "A8.smooth.ce_vs_nn", "A8.smooth.w_vs_nn", "A8.smooth.wce_vs_nn"]),
+    ("A8.compositional_er", "A8", "A8", "A8.2 深层组合函数 ER", "Deep compositional ER",
+     "evidence", False, SYN_MECH("compositional"),
+     ["A8.compos.nn_vs_xgb", "A8.compos.ce_vs_nn", "A8.compos.w_vs_nn", "A8.compos.wce_vs_nn"]),
+    ("A8.highdim", "A8", "A8", "A8.3 高维稠密平滑交互", "High-dimensional smooth interactions",
+     "evidence", False, SYN_MECH("highdim_smooth"),
+     ["A8.highdim.nn_vs_xgb", "A8.highdim.ce_vs_nn", "A8.highdim.w_vs_nn", "A8.highdim.wce_vs_nn"]),
+    ("A8.periodic", "A8", "A8", "A8.4 平滑周期/多尺度函数", "Periodic / multiscale functions",
+     "evidence", False, SYN_MECH("periodic"),
+     ["A8.periodic.nn_vs_xgb", "A8.periodic.ce_vs_nn", "A8.periodic.w_vs_nn", "A8.periodic.wce_vs_nn"]),
+    ("A8.temporal", "A8", "A8", "A8.5 平滑时间序列 SEM", "Smooth temporal SEM",
+     "evidence", False, SYN_MECH("temporal_smooth"),
+     ["A8.temporal.nn_vs_xgb", "A8.temporal.ce_vs_nn", "A8.temporal.w_vs_nn", "A8.temporal.wce_vs_nn"]),
+
     # ---------- G0 contract & F0 ----------
     ("G0", "S0", "G0", "G0 公平比较与可追溯性合同", "Fair-comparison and traceability contract", "code", False, TRUE, []),
     ("G0.1_metric_schema_valid", "G0", "G0", "G0.1 指标表结构有效", "Metric schema is valid", "code", False,
@@ -321,17 +357,15 @@ LIT = {
 }
 SCRIPT_ONLY = {"A6.lag", "A6.trend", "A6.regime", "A6.huber", "A3.quantile_residual",
                "G0.6_frozen_selection_receipt",
-               "A2.W_mask", "A2.W_bias_calibration", "A4.parents_limit"}
-REGISTRY_ONLY = {"S0", "B0", "A1", "A2", "A3", "A4", "A5", "A6", "G0", "H1"}
+               "A2.W_mask", "A2.W_bias_calibration", "A4.parents_limit",
+               "A8.smooth_er", "A8.compositional_er", "A8.highdim",
+               "A8.periodic", "A8.temporal"}
+REGISTRY_ONLY = {"S0", "B0", "A1", "A2", "A3", "A4", "A5", "A6", "G0", "H1", "A8"}
 LITERATURE_ONLY = {"A3.KCI_HSIC", "A4.stability_selection", "A4.non_gaussian_moments"}
 NOT_IMPL_GATES = {"F0"}
 OVERRIDE_CLAIM = {
     "B0.mark_cc_total100": "open_hard_gate",
-    "A1.ALM_ALL": "pending_pairing",
-    "A1.PBM_ALL": "pending_pairing",
     "A1.HYBRID_ALM_PBM": "inactive_under_independence_only",
-    "A1.STOCHASTIC_PBM": "open",
-    "A1.SCO_LAYER": "open",
     "A4.graph_quality": "implemented_unverified",
     "A4.constraint_quality": "implemented_unverified",
     "A4.solver_stability": "implemented_unverified",

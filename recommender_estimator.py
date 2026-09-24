@@ -441,7 +441,7 @@ class RecommenderBaseEstimator(BaseEstimator):
         artifact as a reference metric.
         """
         oracle = str(getattr(self.cfg, "constraint_audit_oracle", "none")).strip().lower()
-        if oracle != "synthetic_linear_sem":
+        if oracle not in {"synthetic_linear_sem", "synthetic_generator_oracle"}:
             return None
         try:
             reference = np.asarray(self.w_est, dtype=float)
@@ -939,13 +939,40 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
         mode = str(getattr(self.cfg, "constraint_audit_oracle", "none")).strip().lower()
         if mode in {"", "none", "off"}:
             return None
-        if mode != "synthetic_linear_sem":
-            raise ValueError(
-                "constraint_audit_oracle must be 'none' or 'synthetic_linear_sem', "
-                f"got {mode!r}."
-            )
         weights = np.asarray(self.w_est, dtype=float)
         raw_x = np.asarray(X, dtype=float)
+
+        if mode == "synthetic_generator_oracle":
+            mechanism = str(
+                getattr(self.cfg, "constraint_audit_oracle_mechanism", "linear") or "linear"
+            ).strip().lower()
+            if mechanism == "temporal_smooth":
+                # A fold's static feature matrix has no lag column, so the
+                # temporal conditional mean cannot be reconstructed here by
+                # reusing the static oracle.  Refuse rather than silently
+                # returning a wrong (static) oracle.
+                raise ValueError(
+                    "synthetic_generator_oracle does not support mechanism "
+                    "'temporal_smooth' from a static feature matrix; supply a "
+                    "lag-augmented feature set / rolling-split oracle instead."
+                )
+            reference = self._synthetic_true_w_for_names(list(self.get_current_column_names(X)))
+            if reference is None:
+                return None
+            # ``_synthetic_true_w_for_names`` returns W in [features..., target]
+            # order, so the target is the last index.
+            target_index = reference.shape[0] - 1
+            from synthetic_utils import structural_conditional_mean
+
+            oracle_raw = structural_conditional_mean(
+                reference, raw_x, mechanism, target_index)
+            return (oracle_raw - float(self._y_mean)) / float(self._y_std)
+
+        if mode != "synthetic_linear_sem":
+            raise ValueError(
+                "constraint_audit_oracle must be 'none', 'synthetic_linear_sem' "
+                f"or 'synthetic_generator_oracle', got {mode!r}."
+            )
         if weights.shape != (raw_x.shape[1] + 1, raw_x.shape[1] + 1):
             raise ValueError(
                 "Synthetic oracle W shape does not match the active predictor features: "
@@ -990,6 +1017,25 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             if y_oracle is None
             else y_oracle * float(self._y_std) + float(self._y_mean)
         )
+
+        # Provenance for the audit: where the constraint structure came from and
+        # which oracle (if any) judged it.  ``true_dag`` means the constraints
+        # were built on the supplied (synthetic-truth) W, i.e. recalculate_dag
+        # was off; otherwise the DAG was estimated.
+        _oracle_mode = str(getattr(self.cfg, "constraint_audit_oracle", "none")).strip().lower()
+        _recalc_dag = bool(getattr(self.cfg, "recalculate_dag", True))
+        constraint_source = (
+            "true_dag" if (_oracle_mode.startswith("synthetic") and not _recalc_dag)
+            else "estimated_dag"
+        )
+        if _oracle_mode == "synthetic_generator_oracle":
+            oracle_type = str(
+                getattr(self.cfg, "constraint_audit_oracle_mechanism", "linear") or "linear"
+            ).strip().lower()
+        elif _oracle_mode == "synthetic_linear_sem":
+            oracle_type = "linear"
+        else:
+            oracle_type = "none"
 
         metadata_rows = []
         statistic_rows = []
@@ -1082,6 +1128,8 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
                         "margin_or_tolerance": margin,
                         "posterior_support": spec.get("posterior_support"),
                         "opposing_support": spec.get("opposing_support"),
+                        "constraint_source": constraint_source,
+                        "oracle_type": oracle_type,
                     }
                 )
 
@@ -1114,6 +1162,13 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
                 oracle_value = None if oracle_values is None else oracle_values[constraint_index - 1]
                 oracle_violation, oracle_enforced = (
                     (None, None) if oracle_value is None else violation(oracle_value, row_tolerance)
+                )
+                # statistic_validity is per-constraint and only known after the
+                # oracle violation is computed, so set it on the row we just
+                # appended.
+                metadata_rows[-1]["statistic_validity"] = (
+                    "not_audited" if oracle_value is None
+                    else ("pass" if float(oracle_violation or 0.0) <= 1e-9 else "fail")
                 )
                 audit_kind = str(
                     getattr(self._rf_model_, "ci_penalty_kind_", "conditional_expectation")

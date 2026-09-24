@@ -1,0 +1,65 @@
+name: synthetic
+graph_type: ER
+seed: 1
+graph_seed: null
+noise_seed: null
+n_samples: 10000
+n_nodes: 50
+expected_edges: 120
+sem_type: gauss
+noise_scale: 1.0
+noise_df: 5.0
+# A7 NN-favourable mechanism.  Kept separate from sem_type so these runs are
+# recorded under their own scope and never mixed with linear ER evidence.
+synthetic_mechanism: highdim_smooth
+target: X49
+features:
+  - X0
+  - X1
+  - X2
+  - X3
+  - X4
+  - X5
+  - X6
+  - X7
+  - X8
+  - X9
+  - X10
+  - X11
+  - X12
+  - X13
+  - X14
+  - X15
+  - X16
+  - X17
+  - X18
+  - X19
+  - X20
+  - X21
+  - X22
+  - X23
+  - X24
+  - X25
+  - X26
+  - X27
+  - X28
+  - X29
+  - X30
+  - X31
+  - X32
+  - X33
+  - X34
+  - X35
+  - X36
+  - X37
+  - X38
+  - X39
+  - X40
+  - X41
+  - X42
+  - X43
+  - X44
+  - X45
+  - X46
+  - X47
+  - X48

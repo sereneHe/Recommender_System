@@ -234,6 +234,7 @@ def main():
             "phase": infer_phase(exp), "experiment": exp, "exp_id": exp_id, "run_id": run_id,
             "solver": solver.get("name"), "problem": problem.get("name"),
             "graph_type": problem.get("graph_type"), "sem_type": problem.get("sem_type"),
+            "synthetic_mechanism": problem.get("synthetic_mechanism"),
             "target": problem.get("target"), "seed": problem.get("seed"),
             "graph_seed": problem.get("graph_seed"), "noise_seed": problem.get("noise_seed"),
             "n_samples": problem.get("n_samples"), "n_nodes": problem.get("n_nodes"),

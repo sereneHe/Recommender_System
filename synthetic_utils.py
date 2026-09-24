@@ -1,6 +1,21 @@
-"""Deterministic ER/SF DAG and linear-SEM data generation for experiments."""
+"""Deterministic ER/SF DAG and SEM data generation for experiments.
+
+Two families live here:
+
+* the historical **linear** SEM (``sem_type`` in gauss/laplace/student_t, plus
+  the legacy per-edge ``nonlinear`` stress test), kept byte-for-byte compatible;
+* explicit **NN-favourable mechanisms** selected by ``synthetic_mechanism``
+  (smooth additive, deep compositional, high-dimensional smooth interaction,
+  periodic/multiscale, temporal smooth). These are NOT overloads of
+  ``sem_type``: they change the structural equations and expose the true
+  conditional mean ``oracle_fn`` so a constraint audit uses the real generator
+  rather than a linear ``X @ W`` surrogate.
+"""
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -181,30 +196,298 @@ def load_data(
     seed: int = 1,
     graph_seed: int | None = None,
     noise_seed: int | None = None,
+    mechanism: str = "linear",
+    target_node: int | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """Return synthetic observations and the weighted ground-truth DAG.
 
     ``graph_seed`` controls both topology and structural coefficients, while
     ``noise_seed`` controls only SEM innovations.  Leaving both unset keeps
     the historical single-generator ``seed`` behavior exactly.
+
+    ``mechanism`` selects the structural equation family.  ``"linear"`` with
+    both seeds unset reproduces the historical generator byte-for-byte; any
+    NN-favourable mechanism routes through :func:`simulate_synthetic_problem`.
     """
-    if graph_seed is None and noise_seed is None:
+    mechanism = str(mechanism or "linear").strip().lower()
+    if mechanism == "linear" and graph_seed is None and noise_seed is None:
         rng = np.random.default_rng(int(seed))
         adjacency = simulate_dag(n_nodes, expected_edges, graph_type, rng)
         weights = simulate_parameters(adjacency, rng)
-        sample_rng = rng
-    else:
-        graph_rng = np.random.default_rng(int(seed if graph_seed is None else graph_seed))
-        adjacency = simulate_dag(n_nodes, expected_edges, graph_type, graph_rng)
-        weights = simulate_parameters(adjacency, graph_rng)
-        sample_rng = np.random.default_rng(int(seed if noise_seed is None else noise_seed))
-    samples = simulate_linear_sem(
-        weights,
-        n_samples,
-        sample_rng,
+        samples = simulate_linear_sem(
+            weights, n_samples, rng,
+            sem_type=sem_type, noise_scale=noise_scale, noise_df=noise_df,
+        )
+        columns = [f"X{index}" for index in range(int(n_nodes))]
+        return pd.DataFrame(samples, columns=columns), weights
+
+    samples_df, weights, _oracle, _meta = simulate_synthetic_problem(
+        graph_type=graph_type,
+        n_samples=n_samples,
+        n_nodes=n_nodes,
+        expected_edges=expected_edges,
+        mechanism=mechanism,
+        graph_seed=int(seed if graph_seed is None else graph_seed),
+        noise_seed=int(seed if noise_seed is None else noise_seed),
         sem_type=sem_type,
         noise_scale=noise_scale,
         noise_df=noise_df,
+        target_node=target_node,
     )
-    columns = [f"X{index}" for index in range(int(n_nodes))]
-    return pd.DataFrame(samples, columns=columns), weights
+    return samples_df, weights
+
+
+# ===========================================================================
+# NN-favourable synthetic mechanisms (A7)
+# ===========================================================================
+# These change the STRUCTURAL EQUATIONS, not the noise.  They are selected by
+# ``problem.synthetic_mechanism`` and deliberately kept separate from
+# ``sem_type`` so a run can never be mislabelled as ordinary ER.
+MECHANISMS = (
+    "linear",
+    "smooth_additive",
+    "compositional",
+    "highdim_smooth",
+    "periodic",
+    "temporal_smooth",
+)
+
+# Scope label each mechanism must be recorded under (see evidence _common.sh).
+MECHANISM_SCOPE = {
+    "linear": "synthetic/ER",
+    "smooth_additive": "synthetic/SmoothER",
+    "compositional": "synthetic/CompositionalER",
+    "highdim_smooth": "synthetic/HighDim",
+    "periodic": "synthetic/Periodic",
+    "temporal_smooth": "synthetic/Temporal",
+}
+
+_SMOOTH_LINKS = ("tanh", "sin", "softplus")
+
+
+def _link(name: str, z: np.ndarray) -> np.ndarray:
+    name = str(name).lower()
+    if name == "tanh":
+        return np.tanh(z)
+    if name == "sin":
+        return np.sin(z)
+    if name == "softplus":
+        return np.log1p(np.exp(-np.abs(z))) + np.maximum(z, 0.0)
+    if name == "identity":
+        return z
+    raise ValueError(f"unknown smooth link {name!r}")
+
+
+def _simulate_layered_dag(n_nodes: int, expected_edges: int, n_layers: int,
+                          rng: np.random.Generator) -> np.ndarray:
+    """Acyclic layered graph: edges only go from earlier to later layers.
+
+    Depth (not width) is then the thing a network can exploit, so a shallow
+    tree ensemble has to approximate the composition with many splits.
+    """
+    n_nodes = int(n_nodes)
+    n_layers = max(2, min(int(n_layers), n_nodes))
+    layer = np.minimum((np.arange(n_nodes) * n_layers) // n_nodes, n_layers - 1)
+    candidates = np.array(
+        [(s, t) for s in range(n_nodes) for t in range(n_nodes)
+         if layer[s] < layer[t]],
+        dtype=int,
+    )
+    if len(candidates) == 0:
+        return _simulate_er_dag(n_nodes, expected_edges, rng)
+    n_edges = min(int(expected_edges), len(candidates))
+    selected = rng.choice(len(candidates), size=n_edges, replace=False)
+    adjacency = np.zeros((n_nodes, n_nodes), dtype=float)
+    adjacency[tuple(candidates[selected].T)] = 1.0
+    if not adjacency[:, -1].any():
+        later = [i for i in range(n_nodes - 1) if layer[i] < layer[-1]]
+        if later:
+            adjacency[int(rng.choice(later)), -1] = 1.0
+    return adjacency
+
+
+def _structural_mean(samples: np.ndarray, weights: np.ndarray, target: int,
+                     mechanism: str, links: tuple, rng: np.random.Generator,
+                     interactions: dict, temporal_parents: np.ndarray | None,
+                     temporal_rho: float) -> np.ndarray:
+    """True conditional mean E[X_target | Pa(target)] for the mechanism."""
+    parents = np.flatnonzero(weights[:, target])
+    if len(parents) == 0:
+        return np.zeros(samples.shape[0], dtype=float)
+    pa = samples[:, parents]
+    z = pa @ weights[parents, target]
+    if mechanism == "linear":
+        return z
+    if mechanism in ("smooth_additive", "compositional"):
+        return _link(links[target % len(links)], z)
+    if mechanism == "highdim_smooth":
+        out = np.tanh(z)
+        inter = interactions.get(target)
+        if inter:
+            a, b = inter[0]
+            out = out + 0.2 * np.sin(samples[:, a] * samples[:, b])
+            if len(inter) > 1:
+                c, d = inter[1]
+                out = out + 0.1 * samples[:, c] * samples[:, d]
+        return out
+    if mechanism == "periodic":
+        return np.sin(z) + 0.5 * np.cos(2.0 * z)
+    if mechanism == "temporal_smooth":
+        base = np.tanh(z)
+        if temporal_parents is not None and temporal_parents.shape[1] == len(parents):
+            z_lag = temporal_parents @ weights[parents, target]
+            base = np.tanh(z + temporal_rho * z_lag)
+        return base
+    raise ValueError(f"unknown mechanism {mechanism!r}")
+
+
+def simulate_synthetic_problem(
+    *,
+    graph_type: str = "ER",
+    n_samples: int = 10000,
+    n_nodes: int = 20,
+    expected_edges: int = 30,
+    mechanism: str = "linear",
+    graph_seed: int = 1,
+    noise_seed: int = 101,
+    sem_type: str = "gauss",
+    noise_scale: float = 1.0,
+    noise_df: float = 5.0,
+    target_node: int | None = None,
+    smooth_links: tuple = _SMOOTH_LINKS,
+    n_layers: int = 3,
+    temporal_lag: int = 1,
+    temporal_rho: float = 0.5,
+) -> tuple[pd.DataFrame, np.ndarray, "callable", dict]:
+    """Generate a synthetic problem and expose its TRUE conditional mean.
+
+    Returns ``(samples_df, w_true, oracle_fn, metadata)`` where ``oracle_fn``
+    maps an ``(n, p)`` feature matrix to ``E[target | parents]`` under the real
+    generating mechanism (never a linear surrogate).
+    """
+    mechanism = str(mechanism or "linear").strip().lower()
+    if mechanism not in MECHANISMS:
+        raise ValueError(f"mechanism must be one of {MECHANISMS}, got {mechanism!r}")
+    n_nodes = int(n_nodes)
+    target = n_nodes - 1 if target_node is None else int(target_node)
+
+    graph_rng = np.random.default_rng(int(graph_seed))
+    if mechanism == "compositional":
+        adjacency = _simulate_layered_dag(n_nodes, expected_edges, n_layers, graph_rng)
+    else:
+        adjacency = simulate_dag(n_nodes, expected_edges, graph_type, graph_rng)
+    weights = simulate_parameters(adjacency, graph_rng)
+
+    # Deterministic per-node interaction pairs for the interaction mechanisms.
+    interactions: dict[int, list] = {}
+    for j in range(n_nodes):
+        parents = list(np.flatnonzero(weights[:, j]))
+        if len(parents) >= 2 and mechanism in ("highdim_smooth", "periodic"):
+            interactions[j] = [(parents[0], parents[1])]
+            if len(parents) >= 4:
+                interactions[j].append((parents[2], parents[3]))
+
+    sample_rng = np.random.default_rng(int(noise_seed))
+    samples = np.zeros((int(n_samples), n_nodes), dtype=float)
+    for t in range(n_nodes):
+        mean = _structural_mean(samples, weights, t, mechanism, smooth_links,
+                                sample_rng, interactions, None, temporal_rho)
+        samples[:, t] = mean + sample_rng.normal(0.0, noise_scale, size=n_samples)
+
+    # Temporal variant: rerun sequentially so node j at time t also sees its
+    # parents at t-1 (a stationary, smooth dynamic SEM).
+    temporal_parents_by_target: dict[int, np.ndarray] = {}
+    if mechanism == "temporal_smooth":
+        sample_rng = np.random.default_rng(int(noise_seed))
+        series = np.zeros((int(n_samples), n_nodes), dtype=float)
+        for t in range(1, int(n_samples)):
+            for j in range(n_nodes):
+                parents = np.flatnonzero(weights[:, j])
+                cur = float(series[t, parents] @ weights[parents, j]) if len(parents) else 0.0
+                lag = float(series[t - 1, parents] @ weights[parents, j]) if len(parents) else 0.0
+                series[t, j] = np.tanh(cur + temporal_rho * lag) + sample_rng.normal(0.0, noise_scale)
+        samples = series
+        for j in range(n_nodes):
+            parents = np.flatnonzero(weights[:, j])
+            if len(parents):
+                lag_block = np.zeros((int(n_samples), len(parents)), dtype=float)
+                lag_block[1:] = samples[:-1, parents]
+                temporal_parents_by_target[j] = lag_block
+
+    columns = [f"X{index}" for index in range(n_nodes)]
+    samples_df = pd.DataFrame(samples, columns=columns)
+
+    def oracle_fn(features) -> np.ndarray:
+        data = np.asarray(features, dtype=float)
+        return _structural_mean(data, weights, target, mechanism, smooth_links,
+                                np.random.default_rng(0), interactions,
+                                temporal_parents_by_target.get(target),
+                                temporal_rho)
+
+    metadata = {
+        "schema_version": 1,
+        "mechanism": mechanism,
+        "scope": MECHANISM_SCOPE[mechanism],
+        "graph_type": str(graph_type).upper(),
+        "n_samples": int(n_samples),
+        "n_nodes": n_nodes,
+        "expected_edges": int(expected_edges),
+        "graph_seed": int(graph_seed),
+        "noise_seed": int(noise_seed),
+        "target_node": f"X{target}",
+        "noise_scale": float(noise_scale),
+        "smooth_links": list(smooth_links),
+        "n_layers": int(n_layers) if mechanism == "compositional" else None,
+        "temporal_lag": int(temporal_lag) if mechanism == "temporal_smooth" else None,
+        "temporal_rho": float(temporal_rho) if mechanism == "temporal_smooth" else None,
+        "oracle_type": "structural_conditional_mean",
+        "true_parents_of_target": [f"X{i}" for i in np.flatnonzero(weights[:, target])],
+    }
+    return samples_df, weights, oracle_fn, metadata
+
+
+def structural_conditional_mean(weights, features, mechanism: str, target: int,
+                                temporal_parents=None, temporal_rho: float = 0.5,
+                                smooth_links: tuple = _SMOOTH_LINKS) -> np.ndarray:
+    """Public, deterministic E[target | parents] for the given mechanism.
+
+    Unlike :func:`simulate_synthetic_problem`'s closure this takes the weights
+    directly, so any consumer that holds the true ``W`` (e.g. an oracle audit in
+    the estimator) can compute the real conditional mean without re-running the
+    generator or knowing the seed.  Interaction pairs and per-node links are
+    derived deterministically from ``weights`` exactly as in generation.
+    """
+    weights = np.asarray(weights, dtype=float)
+    data = np.asarray(features, dtype=float)
+    n_nodes = weights.shape[0]
+    interactions: dict[int, list] = {}
+    for j in range(n_nodes):
+        parents = list(np.flatnonzero(weights[:, j]))
+        if len(parents) >= 2 and mechanism in ("highdim_smooth", "periodic"):
+            interactions[j] = [(parents[0], parents[1])]
+            if len(parents) >= 4:
+                interactions[j].append((parents[2], parents[3]))
+    return _structural_mean(data, weights, int(target), str(mechanism),
+                            tuple(smooth_links), np.random.default_rng(0),
+                            interactions, temporal_parents, float(temporal_rho))
+
+
+def save_synthetic_artifacts(output_dir, samples_df, w_true, oracle_fn, metadata) -> dict:
+    """Persist the ground truth a downstream audit must consume.
+
+    Writes ``W_true.csv``, ``generator_metadata.yaml``, ``oracle_prediction.csv``
+    (the true conditional mean for every row) and returns the paths.
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    w_path = out / "W_true.csv"
+    np.savetxt(w_path, np.asarray(w_true), delimiter=",")
+    meta_path = out / "generator_metadata.yaml"
+    meta_path.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    oracle_path = out / "oracle_prediction.csv"
+    oracle_vals = np.asarray(oracle_fn(samples_df.to_numpy()), dtype=float)
+    pd.DataFrame({"oracle_mean": oracle_vals}).to_csv(oracle_path, index=False)
+    return {"W_true": str(w_path), "generator_metadata": str(meta_path),
+            "oracle_prediction": str(oracle_path)}
+

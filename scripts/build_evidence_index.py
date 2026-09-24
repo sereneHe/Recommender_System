@@ -57,6 +57,8 @@ VIOLATION_REL_TOL = 0.01
 # pair instead of being silently recorded).
 REGISTRY_HYP_FOR_COMPARISON = {
     "H1.ce_vs_nn.ER": "H1",
+    "A8.nn_vs_xgb.SmoothER": "A8",
+    "A8.ce_vs_nn.SmoothER": "A8",
 }
 REGISTRY_PATH = ROOT / "experiment_registry.yaml"
 
@@ -379,8 +381,26 @@ def parse_arm(exp: str):
     return exp, None, None, None
 
 
+_MECHANISM_SCOPE = {
+    "smooth_additive": "synthetic/SmoothER",
+    "compositional": "synthetic/CompositionalER",
+    "highdim_smooth": "synthetic/HighDim",
+    "periodic": "synthetic/Periodic",
+    "temporal_smooth": "synthetic/Temporal",
+}
+
+
 def scope_of(r):
     if r["problem"] == "synthetic":
+        # The A7 mechanisms are distinct data families: never record them as
+        # plain ER or their evidence would be mixed with the linear results.
+        try:
+            mech = r.get("synthetic_mechanism")
+        except Exception:
+            mech = None
+        mech = "" if mech is None else str(mech).strip().lower()
+        if mech in _MECHANISM_SCOPE:
+            return _MECHANISM_SCOPE[mech]
         return f"synthetic/{r['graph_type']}"
     if r["problem"] == "industry_eu":
         return "FRED"
@@ -589,6 +609,32 @@ COMPARISONS = [
     ("B0.hc_w_ce_vs_ce.er", "B0", "synthetic/ER", "EV:B0.hc_ce_only:hc_ce_only",
      "EV:B0.hc_w_ce:hc_w_ce", "mechanism", "w", req(use_w_constraints=True, use_ci_penalty=True)),
 ]
+
+# ---- A8: NN-favourable mechanisms (own scopes; never mixed with linear ER) --
+# Each mechanism gets: NN vs the fixed XGB reference (the pre-registered NN
+# advantage claim), plus CE/W/W+CE vs the NN baseline to separate "NN bias" from
+# "the constraints add information".
+_A8_MECHANISMS = [
+    ("smooth", "synthetic/SmoothER"),
+    ("compos", "synthetic/CompositionalER"),
+    ("highdim", "synthetic/HighDim"),
+    ("periodic", "synthetic/Periodic"),
+    ("temporal", "synthetic/Temporal"),
+]
+for _short, _scope in _A8_MECHANISMS:
+    COMPARISONS += [
+        (f"A8.{_short}.nn_vs_xgb", "A8", _scope, "EV:A8:xgb100",
+         "EV:A8:nn0", "end_to_end", "none", None),
+        (f"A8.{_short}.ce_vs_nn", "A8", _scope, "EV:A8:nn0",
+         "EV:A8:nn_ce_true", "mechanism", "ce",
+         req(use_ci_penalty=True, use_w_constraints=False)),
+        (f"A8.{_short}.w_vs_nn", "A8", _scope, "EV:A8:nn0",
+         "EV:A8:nn_w_true", "mechanism", "w",
+         req(use_ci_penalty=False, use_w_constraints=True)),
+        (f"A8.{_short}.wce_vs_nn", "A8", _scope, "EV:A8:nn0",
+         "EV:A8:nn_w_ce_true", "mechanism", "w",
+         req(use_ci_penalty=True, use_w_constraints=True)),
+    ]
 
 
 def cohort_of(r) -> str:

@@ -244,21 +244,42 @@ def reserve_cohort(
     cohort_id = str(cohort_id).strip()
     if not cohort_id or "/" in cohort_id or cohort_id in (".", ".."):
         raise ValueError(f"invalid cohort id: {cohort_id!r}")
+    path = Path(registry_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    cohort_dir = path / cohort_id
+    record_file = _record_path(path, cohort_id)
+    # A genuine duplicate is a cohort that already has a record.  An empty
+    # cohort dir can legitimately exist because the "remote" reserve ran on the
+    # SAME filesystem as the local one (submit_cohort.sh runs on the
+    # authoritative server), so the remote mkdir creates exactly this directory.
+    if record_file.exists():
+        raise RuntimeError(
+            f"cohort id {cohort_id!r} is already registered; mint a new id "
+            f"(a retry must be a new immutable cohort, never a reuse)")
+    remote_created = False
     if remote:
         host = server_host or SERVER_HOST
         remote_dir = f"{(server_registry_dir or SERVER_REGISTRY_DIR).rstrip('/')}/{cohort_id}"
         ok, msg = _ssh_mkdir(host, remote_dir, ssh_opts or SSH_OPTS,
                              _runner=_ssh_runner)
-        if not ok:
+        if ok:
+            remote_created = True
+        elif msg.startswith("duplicate"):
+            # Same host / same filesystem: the "remote" directory is this local
+            # one.  Only a real duplicate (an existing record) is an error.
+            if record_file.exists():
+                raise RuntimeError(
+                    f"cohort id {cohort_id!r} is already registered; mint a new id")
+        else:
             raise RuntimeError(f"remote reserve failed for {cohort_id!r}: {msg}")
-    path = Path(registry_dir)
-    path.mkdir(parents=True, exist_ok=True)
     try:
-        (path / cohort_id).mkdir()
+        cohort_dir.mkdir()
     except FileExistsError:
-        raise RuntimeError(
-            f"cohort id {cohort_id!r} is already registered; mint a new id "
-            f"(a retry must be a new immutable cohort, never a reuse)")
+        if not (remote and not record_file.exists()):
+            raise RuntimeError(
+                f"cohort id {cohort_id!r} is already registered; mint a new id "
+                f"(a retry must be a new immutable cohort, never a reuse)")
+        # else: the remote mkdir created this same directory; fall through.
     record = {
         "cohort_id": cohort_id,
         "hypothesis": hyp_name,
