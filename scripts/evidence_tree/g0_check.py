@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -272,11 +273,19 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write via a temp file + atomic rename so a concurrent reader never sees
+    a half-written receipt (two refreshes racing must not corrupt the JSON)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _write_receipt(path: Path, state: str, failures: list[str], cohort: str | None,
                    units: dict | None, notes: list[str] | None = None,
                    index_path: Path | None = None,
                    sync: dict | None = None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,
         "gate": "G0",
@@ -291,7 +300,7 @@ def _write_receipt(path: Path, state: str, failures: list[str], cohort: str | No
         "sync": sync or {},
         "checked_at_utc": datetime.now(timezone.utc).isoformat(),
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

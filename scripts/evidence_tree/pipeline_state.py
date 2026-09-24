@@ -20,6 +20,7 @@ degraded but explicit state, never a silent verdict.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -168,7 +169,10 @@ def build() -> dict:
 def main() -> int:
     out = REPORTS / "pipeline_state.json"
     payload = build()
-    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(f".json.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, out)
     print(f"wrote {out} (state={payload['state']})")
     return 0
 

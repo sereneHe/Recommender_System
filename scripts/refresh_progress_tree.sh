@@ -17,6 +17,17 @@ source scripts/python_runtime.sh
 project_python_require "$(pwd)"
 PY="${PYTHON_BIN}"
 
+# Single-writer lock: two concurrent refreshes (e.g. a manual run plus one
+# triggered from the dashboard page) must never write the same receipts at
+# once, or a half-written JSON can be produced.  'mkdir' is atomic.
+LOCKDIR="reports/.refresh.lock"
+mkdir -p reports
+if ! mkdir "${LOCKDIR}" 2>/dev/null; then
+  echo "[refresh] another refresh is running (${LOCKDIR}); refusing to run concurrently." >&2
+  exit 3
+fi
+trap 'rmdir "${LOCKDIR}" 2>/dev/null || true' EXIT INT TERM
+
 # One refresh = one sync receipt.  G0 only consumes the receipt carrying THIS
 # id, so a stale mirror can never be audited as if it were fresh.
 REFRESH_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"

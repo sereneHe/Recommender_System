@@ -480,5 +480,29 @@ class TestCanonicalAttempt(unittest.TestCase):
         self.assertIn("--supersedes", text)
 
 
+class TestA8NNfavorable(unittest.TestCase):
+    """A8 NN-favourable axis is wired: scopes, comparisons, nodes, registry."""
+
+    def test_registry_has_a8_with_fifteen_units(self):
+        h = reg.hypothesis(reg.load(REGISTRY_PATH), "A8")
+        self.assertEqual(h["scope"], "synthetic/SmoothER")
+        self.assertEqual(reg.seed_table_units(h["seed_table"]), 15)
+        self.assertEqual(h["practical_threshold"], 0.05)
+
+    def test_index_has_a8_comparisons_for_every_mechanism(self):
+        ids = {c[0] for c in bei.COMPARISONS}
+        for short in ("smooth", "compos", "highdim", "periodic", "temporal"):
+            for kind in ("nn_vs_xgb", "ce_vs_nn", "w_vs_nn", "wce_vs_nn"):
+                self.assertIn(f"A8.{short}.{kind}", ids, f"A8.{short}.{kind}")
+
+    def test_a8_scopes_are_distinct_families(self):
+        idx = pd.read_csv(ROOT / "reports" / "evidence_index.csv", low_memory=False)
+        a8 = idx[idx.comparison_id.astype(str).str.startswith("A8.")]
+        # scopes must be the mechanism-specific families, never synthetic/ER
+        self.assertTrue(set(a8.scope.unique()) <= {
+            "synthetic/SmoothER", "synthetic/CompositionalER", "synthetic/HighDim",
+            "synthetic/Periodic", "synthetic/Temporal"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
