@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Evidence-tree axis A2: constraint embedding.
 #
-# Nodes: A2.W_global, A2.W_target_residual, A2.W_mask, A2.W_bias_calibration,
+# Nodes: A2.W_target_residual, A2.W_mask, A2.W_bias_calibration,
 # A2.balanced_batch, A2.pruning.
+# The ordinary legacy-global W arm is deliberately not run here: it is the
+# canonical B0.hc_w_only baseline.  Repeating it under A2 would duplicate the
+# same treatment and make the evidence tree count one experiment twice.
 # References: ref_nn (no constraint), ref_ce (CE only).
 #
 # Submit:
@@ -16,11 +19,6 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 announce_stage "A2" "constraint embedding (batch=${EVIDENCE_BATCH_ID})"
 
 run_ref_nn
-
-run_arm "A2.W_global" "w_global" "${EV_COMMON[@]}" \
-  "solver.constrained=true" "solver.use_w_constraints=true" \
-  "solver.use_ci_penalty=false" "solver.w_constraint_mode=legacy_global" \
-  "solver.constraint_audit_oracle=synthetic_linear_sem"
 
 run_arm "A2.W_target_residual" "w_target_residual" "${EV_COMMON[@]}" \
   "solver.constrained=true" "solver.use_w_constraints=true" \

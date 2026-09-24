@@ -21,6 +21,12 @@ if [[ -z "${EVIDENCE_BATCH_ID}" ]]; then
   die "Set EVIDENCE_BATCH_ID explicitly (e.g. EVIDENCE_BATCH_ID=et_${EV_AXIS,,}_er_v1)."
 fi
 
+# All arms in one evidence batch share this cache root.  The estimator still
+# keys each fold cache by its training rows and solver settings; the shared
+# root makes the resulting fold-W identity auditable and reusable by paired
+# arms without mixing independent evidence batches.
+export HC_CE_W_CACHE_DIR="${HC_CE_W_CACHE_DIR:-${REPO_ROOT}/results/evidence_w_cache/${EVIDENCE_BATCH_ID}}"
+
 GRAPH_SEEDS="${GRAPH_SEEDS:-42 43 44}"
 NOISE_SEEDS="${NOISE_SEEDS:-101}"
 SEEDS="${GRAPH_SEEDS}"
@@ -35,6 +41,24 @@ N_INNER="${N_INNER:-100}"
 N_SAMPLES="${N_SAMPLES:-1000}"
 N_NODES="${N_NODES:-10}"
 EXPECTED_EDGES="${EXPECTED_EDGES:-15}"
+
+# Evidence labels are data contracts, not cosmetic names.  Refuse a run when
+# the problem selector does not belong to the scope advertised by the axis;
+# otherwise a synthetic SF or FRED run could silently be recorded as ER.
+case "${EV_SCOPE}" in
+  synthetic/ER)
+    [[ "${PROBLEMS}" == "synthetic_er" ]] || die "EV_SCOPE=synthetic/ER requires PROBLEMS=synthetic_er (got ${PROBLEMS})."
+    ;;
+  synthetic/SF)
+    [[ "${PROBLEMS}" == "synthetic_sf" ]] || die "EV_SCOPE=synthetic/SF requires PROBLEMS=synthetic_sf (got ${PROBLEMS})."
+    ;;
+  FRED)
+    [[ "${PROBLEMS}" == FRED_* ]] || die "EV_SCOPE=FRED requires a FRED_* problem selector (got ${PROBLEMS})."
+    ;;
+  CoDiet)
+    [[ "${PROBLEMS}" == codiet* ]] || die "EV_SCOPE=CoDiet requires a codiet* problem selector (got ${PROBLEMS})."
+    ;;
+esac
 
 # Frozen nuisances: identical for every arm within a cohort.
 HIDDEN_DIM="${HIDDEN_DIM:-32}"
@@ -122,17 +146,25 @@ run_arm() {
       )
       local -a seed_overrides=(
         "solver.random_state=${model_seed}"
-        "solver.cv_random_state=$((model_seed + 10000))"
-        "solver.validation_random_state=$((model_seed + 20000))"
         "++problem.seed=${graph_seed}"
         "++problem.graph_seed=${graph_seed}"
         "++problem.noise_seed=${noise_seed}"
       )
-      # Tree solvers (mark / mark_with_cc) do not declare cv_random_state, so
-      # append it with '+' to keep their CV split matched to the HC arms.
+      # Tree solvers (mark / mark_with_cc) do not declare cv_random_state or
+      # validation_random_state, so add BOTH with '+' and never pass the plain
+      # key first (a plain override on a missing key aborts the Hydra run).
       case "${EV_SOLVER:-hc_predictor_ce}" in
         mark|mark_with_cc)
-          seed_overrides+=("+solver.cv_random_state=$((model_seed + 10000))")
+          seed_overrides+=(
+            "+solver.cv_random_state=$((model_seed + 10000))"
+            "+solver.validation_random_state=$((model_seed + 20000))"
+          )
+          ;;
+        *)
+          seed_overrides+=(
+            "solver.cv_random_state=$((model_seed + 10000))"
+            "solver.validation_random_state=$((model_seed + 20000))"
+          )
           ;;
       esac
       if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then

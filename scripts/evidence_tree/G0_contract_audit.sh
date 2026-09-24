@@ -5,10 +5,16 @@
 # G0.3_exact_split_hash, G0.4_nuisance_config_hash, G0.5_fold_W_cache_hash,
 # G0.6_frozen_selection_receipt.
 #
-# This script runs the scanner and then reports which contract fields are
-# present per run.  It never trains.  G0.3 / G0.5 / G0.6 are not implemented
-# yet (exact split hash, fold-W cache hash, frozen selection receipt); the
-# script reports them as missing rather than faking them.
+# This is a HARD gate, not a field report.  It rescans, rebuilds the evidence
+# index, and then verifies the per-PAIR receipts: the exact split must match on
+# every paired comparison, the nuisance config must match, the fold-W cache hash
+# must match wherever W is a shared nuisance, the artifact must be complete, and
+# no duplicate/excluded pairing may exist inside a frozen cohort.  It exits
+# non-zero when any receipt is missing or unequal, so an incomplete batch cannot
+# be reported as clean evidence.
+#
+# Run this ONLY after the result sync has completed, otherwise the index is
+# stale and the audit is meaningless.
 #
 # Submit (cheap; can also run locally):
 #   EVIDENCE_BATCH_ID=et_g0_v1 \
@@ -21,25 +27,16 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../causal_predictor_plan" && pwd)/_
 announce_stage "G0" "fair-comparison contract audit (no training)"
 
 "${PYTHON_BIN}" scripts/scan_progress_tree.py
+"${PYTHON_BIN}" scripts/build_evidence_index.py
 
-"${PYTHON_BIN}" - <<'PY'
-import pandas as pd
-from pathlib import Path
-p = Path("reports/progress/runs_metrics.csv")
-df = pd.read_csv(p, low_memory=False)
-required = {
-    "G0.1_metric_schema_valid": ["metric_validity", "nmse", "n_folds_nmse"],
-    "G0.2_complete_artifact": ["has_valid_artifact", "is_canonical"],
-    "G0.3_exact_split_hash": ["split_hash"],
-    "G0.4_nuisance_config_hash": ["nuisance_hash", "resolved_config_hash"],
-    "G0.5_fold_W_cache_hash": ["fold_w_cache_hash"],
-    "G0.6_frozen_selection_receipt": ["frozen_selection_receipt"],
-}
-print("contract fields present per node:")
-for node, cols in required.items():
-    present = [c for c in cols if c in df.columns]
-    missing = [c for c in cols if c not in df.columns]
-    print(f"  {node}: present={present} missing={missing}")
-PY
+# G0.1-G0.5 + unique pairing.  Exits non-zero on any failing contract.
+if ! "${PYTHON_BIN}" scripts/evidence_tree/g0_check.py \
+      --index reports/evidence_index.csv \
+      --registry experiment_registry.yaml \
+      --receipt-out reports/gates/G0_H1.json; then
+  echo "G0 CONTRACT AUDIT FAILED: the fair-comparison contract is not satisfied." >&2
+  echo "Do NOT treat this batch as clean evidence; fix the receipts and rerun." >&2
+  exit 1
+fi
 
 echo "=== G0 contract audit complete: batch=${EVIDENCE_BATCH_ID} ==="

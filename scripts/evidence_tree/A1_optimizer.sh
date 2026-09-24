@@ -31,8 +31,11 @@ run_arm "A1.ALM_ALL" "ce_alm_all" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
 
 # Deterministic PBM backend (EV_CE_BASE already picks stochastic_pbm, so
 # without this override PBM_ALL and STOCHASTIC_PBM would be identical runs).
+# humancompatible_pbm only accepts ci_pbm_penalty_update in {const,dimin,dimin_dual};
+# the repo default is "adapt" and would raise ValueError, so pin it explicitly.
 run_arm "A1.PBM_ALL" "ce_pbm_all" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
-  "solver.ce_constraint_backend=pbm_all" "solver.ce_pbm_backend=humancompatible_pbm"
+  "solver.ce_constraint_backend=pbm_all" "solver.ce_pbm_backend=humancompatible_pbm" \
+  "solver.ci_pbm_penalty_update=const"
 
 run_arm "A1.STOCHASTIC_PBM" "ce_spbm_all" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
   "solver.ce_constraint_backend=pbm_all" "solver.ce_pbm_backend=stochastic_pbm"

@@ -1,0 +1,87 @@
+# Machine-readable experiment protocol registry.
+#
+# This file freezes, BEFORE any compute is submitted:
+#   * the reference / candidate arm pair of every hypothesis,
+#   * the scope, primary metric and pre-declared practical threshold,
+#   * the minimum number of independent units and how a unit is defined,
+#   * the exact seed table (and its hash),
+#   * the split contract and the fold-W contract.
+#
+# A cohort id is minted once by scripts/evidence_tree/submit_cohort.sh and
+# recorded in the append-only cohort registry (reports/cohort_registry.jsonl).
+# Re-submitting the same cohort id MUST fail: no local scratch state is trusted
+# to prove that an id was already used.
+#
+# Decisions locked on 2026-09-24:
+#   * practical threshold: 5% relative NMSE improvement, reported in two tiers
+#     (supported: point >= 5% AND CI_lo > 0; strongly_supported: CI_lo >= 5%).
+#   * H1 is a NEW cohort using the requested fixed 42-51 x 101-102 table.
+#     Legacy runs are audited for strict
+#     single-variable status (scripts/evidence_tree/audit_legacy_single_variable.py);
+#     any arm that is not a strict single-variable contrast is rerun here.
+#   * H1 inference units are graph x noise (10 graphs x 2 noise = 20), as chosen
+#     by the researcher; the dashboard displays all 20 graph x noise units.
+#   * F0 reserves an independent, disjoint holdout seed table that is committed
+#     before H1 is submitted.
+
+schema_version: 1
+registry_version: "2026-09-24.1"
+
+hypotheses:
+  H1:
+    id: H1.ce_vs_nn.ER
+    title: "CE-only vs matched NN (no constraint), synthetic ER"
+    scope: synthetic/ER
+    comparison_type: mechanism
+    treatment: ce
+    reference_arm: "EV:H1:nn"
+    candidate_arm: "EV:H1:ce_only"
+    primary_metric: nmse
+    effect_metric: relative_improvement
+    practical_threshold: 0.05
+    strong_threshold: 0.05
+    min_independent_units: 20
+    unit_definition: graph_x_noise
+    # Both arms must share the exact outer split and the fold-W cache: W/DAG is
+    # a frozen nuisance, never an intervention, in this hypothesis.
+    split_contract: same
+    fold_w_contract: same
+    seed_table:
+      graph_seeds: [42, 43, 44, 45, 46, 47, 48, 49, 50, 51]
+      noise_seeds: [101, 102]
+    seed_table_hash: "4cbc61cf2716b82e09c00ed5899319afcb912c2d97ecad920b2e9ea5437c5536"
+    allow_diagnostic_only: false
+
+  F0:
+    id: F0.locked_holdout.ER
+    title: "Locked holdout for the frozen ER configuration"
+    scope: synthetic/ER
+    comparison_type: holdout
+    treatment: none
+    reference_arm: null
+    candidate_arm: null
+    primary_metric: nmse
+    effect_metric: relative_improvement
+    practical_threshold: 0.05
+    strong_threshold: 0.05
+    min_independent_units: 20
+    unit_definition: graph_x_noise
+    split_contract: same
+    fold_w_contract: none
+    # Reserved independently of H1 and of every historical/pilot seed.  F0 must
+    # reject any run whose seed is outside this table.
+    reserved_holdout_seed_table:
+      graph_seeds: [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010]
+      noise_seeds: [501, 502]
+    reserved_holdout_seed_table_hash: "826570def5657134896d2c5949e8e918bd71c756116d15aee7d9c2f75b614b63"
+    allow_diagnostic_only: false
+
+# Legacy diagnostic records.  These are kept for provenance but MUST NOT be
+# used for strict H1 inference.
+diagnostic_records:
+  - id: "priority_ce_*"
+    strict_inference_allowed: false
+    note: "Legacy CE-priority continuation; diagnostic only, not a strict H1 cohort."
+  - id: "C0b.ce_vs_nn.ER@23896397/23908664/23918638"
+    strict_inference_allowed: false
+    note: "Historical pilot cohorts; seeds 42-44 were inspected, so they cannot back a confirmatory H1 claim."

@@ -1,6 +1,8 @@
 import numpy as np
 import logging
 import os
+import hashlib
+import json
 import pandas as pd
 from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.metrics import mean_squared_error
@@ -26,6 +28,90 @@ from recommender_estimator import (
     compute_predictor_errors_scikit,
 )
 from utils import coerce_random_state
+
+
+def _manifest_hash(payload):
+    """Stable full SHA-256 for reproducibility manifests."""
+    encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _index_hash(values):
+    return _manifest_hash([int(v) if isinstance(v, (int, np.integer)) else str(v) for v in values])
+
+
+def _write_cv_split_manifest(prep_data, cv_splits, cv_kind, solver_cfg):
+    """Persist the exact outer split, independent of the estimator output.
+
+    The manifest deliberately records positional indices and the original row
+    labels.  A pair is valid only when both the split hash and row-index hash
+    match; matching ``n_splits`` alone is not sufficient.
+    """
+    row_labels = [str(v) for v in getattr(prep_data, "index", np.arange(len(prep_data)))]
+    folds = []
+    for fold, (train_idx, test_idx) in enumerate(cv_splits, start=1):
+        folds.append({
+            "fold": fold,
+            "n_train": int(len(train_idx)),
+            "n_test": int(len(test_idx)),
+            "train_index_hash": _index_hash(np.asarray(train_idx, dtype=int).tolist()),
+            "test_index_hash": _index_hash(np.asarray(test_idx, dtype=int).tolist()),
+            "train_indices": np.asarray(train_idx, dtype=int).tolist(),
+            "test_indices": np.asarray(test_idx, dtype=int).tolist(),
+        })
+    core = {
+        "schema_version": 1,
+        "cv_kind": str(cv_kind),
+        "n_splits": int(len(cv_splits)),
+        "row_count": int(len(prep_data)),
+        "row_index_hash": _index_hash(row_labels),
+        "cv_strategy": str(getattr(solver_cfg, "cv_strategy", "")),
+        "cv_random_state": getattr(solver_cfg, "cv_random_state", None),
+        "cv_time_test_size": getattr(solver_cfg, "cv_time_test_size", None),
+        "cv_time_gap": getattr(solver_cfg, "cv_time_gap", None),
+        "folds": folds,
+    }
+    manifest = dict(core)
+    manifest["split_hash"] = _manifest_hash(core)
+    write_yaml_artifact("cv_split_manifest.yaml", manifest)
+    return manifest
+
+
+def _write_fold_w_manifest(results, solver_cfg):
+    """Persist per-fold W identities and a single fold-W cache hash.
+
+    A missing W hash is recorded explicitly rather than replaced by a hash of
+    the empty matrix.  This prevents a no-W arm from passing the fold-W gate.
+    """
+    folds = []
+    estimators = results.get("estimator", []) if isinstance(results, dict) else []
+    for fold, estimator in enumerate(estimators, start=1):
+        w_hash = str(getattr(estimator, "_w_est_sha256", "") or "")
+        folds.append({
+            "fold": fold,
+            "w_est_sha256": w_hash,
+            "w_cache_key": str(getattr(estimator, "_w_cache_key", "") or ""),
+            "w_cache_hit": bool(getattr(estimator, "_w_cache_hit", False)),
+            "w_available": bool(w_hash),
+        })
+    available = bool(folds) and all(row["w_available"] for row in folds)
+    # The identity hash must depend ONLY on the estimated W per fold.  Cache
+    # diagnostics (w_cache_hit/w_cache_key/cache_root) differ between the first
+    # arm that populates the cache and a later arm that hits it, so including
+    # them would report the SAME W as different and wrongly fail the G0.5 gate.
+    identity = [{"fold": row["fold"], "w_est_sha256": row["w_est_sha256"]} for row in folds]
+    core = {
+        "schema_version": 1,
+        "n_folds": len(folds),
+        "solver": str(getattr(solver_cfg, "name", "")),
+        "cache_root": os.environ.get("HC_CE_W_CACHE_DIR", ""),
+        "folds": folds,
+    }
+    manifest = dict(core)
+    manifest["available"] = available
+    manifest["fold_w_cache_hash"] = _manifest_hash(identity) if available else ""
+    write_yaml_artifact("fold_w_manifest.yaml", manifest)
+    return manifest
 
 
 def get_mean_average_errors(prep_data, run_feats, target_col, w_est, row_and_col_names,
@@ -458,6 +544,7 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
     logging.info(f"Testing on columns {len(X.columns)}: {X.columns}")
     cv_splits, cv_kind = _make_site_gender_cv_splits(prep_data, target_col, n_runs, solver_cfg)
     logging.info("Using CV splitter for model evaluation: %s", cv_kind)
+    _write_cv_split_manifest(prep_data, cv_splits, cv_kind, solver_cfg)
 
     solver_name = str(getattr(solver_cfg, "name", ""))
     write_constraint_counts = solver_name == "hc_predictor_ce" or model_name == "HC-CE"
@@ -569,11 +656,14 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
             return_estimator=True,
             error_score="raise",
         )
+    _write_fold_w_manifest(results, solver_cfg)
     cv_validation_history = []
     constraint_metadata_rows = []
     constraint_stat_audit_rows = []
     w_constraint_audit_rows = []
+    target_residual_audit_rows = []
     ci_window_filter_audit_rows = []
+    gradient_conflict_rows = []
     constraint_audit_enabled = bool(getattr(solver_cfg, "constraint_audit_enabled", False))
     for fold_idx, estimator in enumerate(results.get("estimator", []), start=1):
         if write_constraint_counts:
@@ -641,6 +731,11 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
             constraint_stat_audit_rows.extend(train_statistic_rows)
             constraint_stat_audit_rows.extend(statistic_rows)
             w_constraint_audit_rows.extend(w_rows)
+            target_residual_audit_rows.extend(
+                row
+                for row in w_rows
+                if row.get("constraint_form") == "target_residual"
+            )
             window_filter_rows = getattr(
                 getattr(estimator, "_rf_model_", None),
                 "ci_window_filter_diagnostics_",
@@ -655,6 +750,19 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
                         "solver": solver_name,
                     }
                 )
+        gradient_history = getattr(estimator, "gradient_conflict_history_", [])
+        for diagnostic_row in gradient_history:
+            gradient_conflict_rows.append(
+                {
+                    **dict(diagnostic_row),
+                    "fold": fold_idx,
+                    "target": str(target_col),
+                    "solver": solver_name,
+                    "w_constraint_mode": str(
+                        getattr(solver_cfg, "w_constraint_mode", "legacy_global")
+                    ),
+                }
+            )
         history = getattr(estimator, "validation_history_", None)
         if history:
             cv_validation_history.append(
@@ -705,6 +813,16 @@ def run_feature_selection_scikit(prep_data, model_name, custom_objective,
         write_text_artifact(
             "w_constraint_audit.csv",
             pd.DataFrame(w_constraint_audit_rows).to_csv(index=False),
+        )
+    if target_residual_audit_rows:
+        write_text_artifact(
+            "target_residual_audit.csv",
+            pd.DataFrame(target_residual_audit_rows).to_csv(index=False),
+        )
+    if gradient_conflict_rows:
+        write_text_artifact(
+            "gradient_conflict_history.csv",
+            pd.DataFrame(gradient_conflict_rows).to_csv(index=False),
         )
     if ci_window_filter_audit_rows:
         write_text_artifact(

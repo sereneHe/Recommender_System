@@ -37,18 +37,31 @@ DAG_FIXED=(
   "solver.loss_type=l2" "solver.reg_type=l2" "solver.a_reg_type=l1"
   "solver.constraints_mode=weights"
 )
-# CE_DAG ends with constraint_audit_oracle=none so it is NOT overwritten by
-# EV_CE_BASE's synthetic_linear_sem (a real ER graph is estimated here, so the
-# true-SEM oracle does not apply).
-CE_DAG=("${EV_CE_BASE[@]}" "solver.constrained=true" "solver.constraint_audit_oracle=none")
+# CE_DAG keeps the synthetic TRUE graph available for AUDIT only (edge
+# F1/SHD/true-edge recall) while W itself is re-estimated by the MILP solver.
+# The oracle is an audit reference (it never enters the training constraints),
+# so A4 can actually judge whether edge penalty / parents cap / clique cap
+# exclude the true graph.
+CE_DAG=("${EV_CE_BASE[@]}" "solver.constrained=true" "solver.constraint_audit_oracle=synthetic_linear_sem")
 
 # --- shared MIP control: one arm serves both the time and the gap contrast ---
 run_arm "A4.mip_control" "mip_control" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
   "solver.time_limit=120" "solver.target_mip_gap=0.01"
 
 # --- A4.mip_time: only the time limit changes (gap fixed at 0.01) ---
-run_arm "A4.mip_time" "mip_time_1800" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
-  "solver.time_limit=1800" "solver.target_mip_gap=0.01"
+# A4 is pre-registered as 120 s control vs 300 s MIP.  Any other value is a
+# DIAGNOSTIC run: it is labelled `mip_time_<t>_diagnostic` and is NOT matched by
+# the strict A4.mip_time.er comparison, which requires the exact `mip_time_300`
+# arm.  This blocks an ambiguous dynamic label from entering the index.
+MIP_TIME_LIMIT="${MIP_TIME_LIMIT:-300}"
+if [[ "${MIP_TIME_LIMIT}" == "300" ]]; then
+  MIP_TIME_ARM="mip_time_300"
+else
+  MIP_TIME_ARM="mip_time_${MIP_TIME_LIMIT}_diagnostic"
+  echo "WARNING: MIP_TIME_LIMIT=${MIP_TIME_LIMIT} is not the pre-registered 300; recording ${MIP_TIME_ARM} as diagnostic only." >&2
+fi
+run_arm "A4.mip_time" "${MIP_TIME_ARM}" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \
+  "solver.time_limit=${MIP_TIME_LIMIT}" "solver.target_mip_gap=0.01"
 
 # --- A4.mip_gap: only the gap changes (time fixed at 120) ---
 run_arm "A4.mip_gap" "mip_gap_1e4" "${EV_COMMON[@]}" "${DAG_FIXED[@]}" "${CE_DAG[@]}" \

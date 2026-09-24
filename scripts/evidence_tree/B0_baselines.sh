@@ -2,7 +2,7 @@
 # Evidence-tree axis B0: comparable classical baselines.
 #
 # Nodes: B0.mark_10, B0.mark_100, B0.mark_cc_10, B0.mark_cc_100,
-# B0.hc_nn_no_constraint, B0.hc_w_only.
+# B0.hc_nn_no_constraint, B0.hc_w_only, B0.hc_ce_only, B0.hc_w_ce.
 #
 # The tree-count node (A5.1 / B0) is only meaningful if the arm names make the
 # tree budget explicit, so the four Mark arms are named mark_10 / mark_100 /
@@ -49,5 +49,11 @@ run_arm "B0.hc_w_only" "hc_w_only" "${EV_COMMON[@]}" \
   "solver.constrained=true" "solver.use_w_constraints=true" \
   "solver.use_ci_penalty=false" "solver.w_constraint_mode=legacy_global" \
   "solver.constraint_audit_oracle=synthetic_linear_sem"
+
+# Canonical CE baselines.  These are owned by B0 so A2 does not rerun the
+# same CE-only or W+CE treatments as embedding experiments.
+run_arm "B0.hc_ce_only" "hc_ce_only" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}"
+run_arm "B0.hc_w_ce" "hc_w_ce" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \
+  "solver.use_w_constraints=true" "solver.w_constraint_mode=legacy_global"
 
 echo "=== B0 baselines complete: batch=${EVIDENCE_BATCH_ID} ==="

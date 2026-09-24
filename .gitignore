@@ -14,3 +14,44 @@ old/
 OECD/
 tmp_summary_check/
 spbm/
+# macOS virtualenv; never commit or rsync it to the cluster (it clobbers the
+# Linux venv there).  The cluster venv lives at $HOME/codiet311_linux.
+codiet311/
+
+# --- Generated artifacts / local-only files (never source) ---
+# PBS job outputs and the pulled run mirror.
+exdbn_*.o*
+exdbn_*.e*
+metacentrum_runs/
+# Hydra run/sweep outputs, scratch, and quarantined bad configs.
+outputs/
+output/
+tmp/
+_quarantine_*
+# Local editor/agent backups.
+*.bak.*
+*.orig
+
+# --- Evidence-pipeline runtime products (rebuilt by refresh; never source) ---
+# Strict index / pairs / exclusions / pooled signal.
+reports/evidence_pairs.csv
+reports/evidence_index.csv
+reports/evidence_exclusions.csv
+reports/evidence_pooled.csv
+reports/evidence_nodes.csv
+reports/evidence_registry.csv
+# Rendered progress tree + metric audit (rebuilt by refresh).
+reports/progress/*
+!reports/progress/dashboard.html
+# Gate receipts, sync receipts, pipeline state (rebuilt every refresh).
+reports/gates/
+reports/sync_receipt.json
+reports/pipeline_state.json
+# Cohort registry / manifests / holdout products (minted at submit/run time).
+reports/cohort_registry/
+reports/cohorts/
+reports/holdout_receipts/
+reports/validation/
+# --- Audit exception: human-signed frozen-selection receipts are immutable
+# records and ARE committed (refresh and the pipeline never overwrite them).
+!reports/frozen_selection/*.yaml

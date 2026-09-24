@@ -4,6 +4,10 @@
 # Nodes: A6.lag, A6.trend, A6.regime, A6.huber.  Runs on FRED monthly industry
 # data with expanding-window time-series CV.
 #
+# NOTE on replication: FRED does not regenerate a DAG per seed, so GRAPH_SEEDS
+# here are repeated MODEL seeds (replicate_seed), not independent graph seeds.
+# Do not report them as graph-seed replication.
+#
 # Submit:
 #   EVIDENCE_BATCH_ID=et_a6_fred_v1 \
 #   qsub -l walltime=24:00:00 \

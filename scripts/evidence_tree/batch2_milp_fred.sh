@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # Evidence-tree batch 2 (MILP / FRED): A4 graph prior + A6 data/time robustness.
 #
-# Expected ~7-10 h at the default 3 graph seeds (A4 is MILP-bound, A6 is FRED);
-# use walltime 15:00:00.  If the A4 mip_time_1800 arm hits the 1800 s cap on
-# every fold it can take much longer; lower MIP_TIME_LIMIT to bound it.
+# Run count at the default 3 graph seeds:
+#   A4 = 11 configs x 3 = 33 runs
+#   A6 =  5 configs x 3 = 15 runs
+#   total = 48 runs   (NOT 51)
+#
+# A4 is MILP-bound.  Bound the long arm with MIP_TIME_LIMIT (e.g. 300) so the
+# walltime estimate is real; otherwise it defaults to 1800 s per fold.
+# Expected ~7-10 h at 3 seeds; use walltime 15:00:00.
 #
 # Submit:
 #   qsub -l walltime=15:00:00 \
-#     -v EXPERIMENT_SCRIPT=scripts/evidence_tree/batch2_milp_fred.sh \
+#     -v EXPERIMENT_SCRIPT=scripts/evidence_tree/batch2_milp_fred.sh,MIP_TIME_LIMIT=300 \
 #     cluster_computing/run_metacentrum.pbs
 
 set -euo pipefail

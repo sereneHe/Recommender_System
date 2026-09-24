@@ -182,10 +182,15 @@ def start_experiment(cfg: DictConfig) -> None:
             "cv_errors.yaml",
             "validation_history.yaml",
             "cv_validation_history.yaml",
+            "cv_split_manifest.yaml",
+            "fold_w_manifest.yaml",
+            "frozen_selection_receipt.yaml",
             "cv_score_normalizers.yaml",
             "constraint_counts.csv",
             "constraint_metadata.csv",
             "constraint_stat_audit.csv",
+            "gradient_conflict_history.csv",
+            "target_residual_audit.csv",
             "w_constraint_audit.csv",
         ):
             artifact_path = Path(output_dir) / artifact_name
@@ -200,6 +205,8 @@ def start_experiment(cfg: DictConfig) -> None:
         for artifact_name in (
             "constraint_metadata.csv",
             "constraint_stat_audit.csv",
+            "gradient_conflict_history.csv",
+            "target_residual_audit.csv",
             "w_constraint_audit.csv",
         ):
             artifact_path = Path(output_dir) / artifact_name

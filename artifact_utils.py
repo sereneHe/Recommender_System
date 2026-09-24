@@ -12,12 +12,17 @@ _ALLOWED_ARTIFACT_NAMES = {
     "constraint_metadata.csv",
     "constraint_stat_audit.csv",
     "cv_fold_metrics.csv",
+    "gradient_conflict_history.csv",
     "ci_window_filter_audit.csv",
     "cv_errors.yaml",
     "cv_score_normalizers.yaml",
     "cv_validation_history.yaml",
+    "cv_split_manifest.yaml",
+    "fold_w_manifest.yaml",
+    "frozen_selection_receipt.yaml",
     "validation_history.yaml",
     "w_constraint_audit.csv",
+    "target_residual_audit.csv",
 }
 
 

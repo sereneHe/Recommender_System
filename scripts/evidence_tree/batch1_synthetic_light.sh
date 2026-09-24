@@ -39,7 +39,20 @@ run_axis B0_baselines.sh                 et_b0_er_v1
 # G0 contract audit is cheap and needs no cohort; run it last.
 echo
 echo "### G0 contract audit ###"
-EVIDENCE_BATCH_ID="${EVIDENCE_BATCH_ID:-et_g0_v1}" bash "${SCRIPT_DIR}/G0_contract_audit.sh" || true
+G0_STATUS="ok"
+EVIDENCE_BATCH_ID="${EVIDENCE_BATCH_ID:-et_g0_v1}" bash "${SCRIPT_DIR}/G0_contract_audit.sh" || G0_STATUS="FAILED"
+if [[ "${G0_STATUS}" != "ok" ]]; then
+  echo
+  echo "!!! G0 CONTRACT AUDIT FAILED — batch 1 is NOT clean evidence !!!" >&2
+  # SCRIPT_DIR is scripts/evidence_tree; the project reports/ dir is two levels up.
+  G0_STATUS_DIR="${SCRIPT_DIR}/../../reports/evidence_tree"
+  mkdir -p "${G0_STATUS_DIR}"
+  echo "G0_STATUS=${G0_STATUS}" > "${G0_STATUS_DIR}/g0_status.txt" 2>/dev/null || true
+fi
 
 echo
-echo "=== evidence batch 1 complete ==="
+if [[ "${G0_STATUS}" == "ok" ]]; then
+  echo "=== evidence batch 1 complete (G0 ok) ==="
+else
+  echo "=== evidence batch 1 finished but G0 FAILED (see g0_status.txt) ==="
+fi

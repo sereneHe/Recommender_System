@@ -61,7 +61,8 @@ def file_fingerprint(adir: Path) -> str:
     """
     h = hashlib.sha256()
     for name in ("config.yaml", "cv_fold_metrics.csv", "cv_errors.yaml",
-                 "cv_score_normalizers.yaml"):
+                 "cv_score_normalizers.yaml", "cv_split_manifest.yaml",
+                 "fold_w_manifest.yaml"):
         p = adir / name
         h.update(name.encode())
         if p.exists():
@@ -163,6 +164,40 @@ def graph_metrics(adir: Path):
     return out
 
 
+def constraint_metrics(adir: Path):
+    """Summarize held-out constraint violation without mixing folds."""
+    out = {}
+    p = adir / "constraint_stat_audit.csv"
+    if p.exists():
+        try:
+            df = pd.read_csv(p)
+            test = df[df["evaluation_split"].astype(str).eq("outer_test")] if "evaluation_split" in df else df
+            for col, key in (("prediction_violation", "ce_prediction_violation"),
+                             ("oracle_violation", "ce_oracle_violation"),
+                             ("observed_violation", "ce_observed_violation")):
+                if col in test:
+                    v = pd.to_numeric(test[col], errors="coerce").dropna()
+                    if len(v):
+                        out[key] = float(v.mean())
+        except Exception:
+            pass
+    p = adir / "w_constraint_audit.csv"
+    if p.exists():
+        try:
+            df = pd.read_csv(p)
+            test = df[df["evaluation_split"].astype(str).eq("outer_test")] if "evaluation_split" in df else df
+            for col, key in (("prediction_l2", "w_prediction_l2"),
+                             ("oracle_l2", "w_oracle_l2"),
+                             ("observed_l2", "w_observed_l2")):
+                if col in test:
+                    v = pd.to_numeric(test[col], errors="coerce").dropna()
+                    if len(v):
+                        out[key] = float(v.mean())
+        except Exception:
+            pass
+    return out
+
+
 def infer_phase(exp: str) -> str:
     e = exp.upper()
     for k in ("PLAN01", "PLAN02", "PLAN03", "PLAN04", "PLAN05", "PLAN06", "PLAN07", "PLAN08", "PLAN09"):
@@ -187,9 +222,13 @@ def main():
         cfg = load_yaml(adir / "config.yaml") or {}
         solver = cfg.get("solver", {}) or {}
         problem = cfg.get("problem", {}) or {}
+        split_manifest = load_yaml(adir / "cv_split_manifest.yaml") or {}
+        w_manifest = load_yaml(adir / "fold_w_manifest.yaml") or {}
+        frozen_receipt = load_yaml(adir / "frozen_selection_receipt.yaml") or {}
         exp = str(cfg.get("experiment") or exp_id)
         nmse, folds, validity = read_metric(adir)
         gm = graph_metrics(adir)
+        cm = constraint_metrics(adir)
         feats = problem.get("features") or []
         rows.append({
             "phase": infer_phase(exp), "experiment": exp, "exp_id": exp_id, "run_id": run_id,
@@ -199,6 +238,9 @@ def main():
             "graph_seed": problem.get("graph_seed"), "noise_seed": problem.get("noise_seed"),
             "n_samples": problem.get("n_samples"), "n_nodes": problem.get("n_nodes"),
             "expected_edges": problem.get("expected_edges"),
+            "feature_lag": problem.get("feature_lag"),
+            "add_time_trend": problem.get("add_time_trend"),
+            "regime_break_date": problem.get("regime_break_date"),
             "evidence_batch_id": problem.get("evidence_batch_id"),
             "evidence_node": problem.get("evidence_node"),
             "evidence_arm": problem.get("evidence_arm"),
@@ -238,6 +280,7 @@ def main():
             "ci_add_dsep_independence": solver.get("ci_add_dsep_independence"),
             "constrained": solver.get("constrained"),
             "huber_delta": solver.get("huber_delta"),
+            "prediction_loss": solver.get("prediction_loss"),
             "dropout": solver.get("dropout"),
             "grad_clip_norm": solver.get("grad_clip_norm"),
             "early_stopping_patience": solver.get("early_stopping_patience"),
@@ -249,6 +292,12 @@ def main():
             "ce_pbm_backend": solver.get("ce_pbm_backend"),
             "stochastic_constrained": solver.get("use_stochastic_constrained_optimizer"),
             "dag_fit_scope": solver.get("dag_fit_scope"),
+            "split_hash": split_manifest.get("split_hash"),
+            "split_manifest_hash": sha(split_manifest) if split_manifest else None,
+            "fold_w_cache_hash": w_manifest.get("fold_w_cache_hash"),
+            "fold_w_manifest_hash": sha(w_manifest) if w_manifest else None,
+            "fold_w_available": w_manifest.get("available", False),
+            "frozen_selection_receipt": frozen_receipt.get("receipt_hash") if frozen_receipt else None,
             "nmse": nmse, "n_folds_nmse": len(folds), "metric_validity": validity,
             "nmse_legacy_double": legacy_double(adir),
             "n_folds_graph": gm.get("_n_folds"),
@@ -261,6 +310,12 @@ def main():
             "indep_constraints": gm.get("independent_constraints"),
             "dep_constraints": gm.get("dependent_constraints"),
             "total_constraints": gm.get("total_constraints"),
+            "ce_prediction_violation": cm.get("ce_prediction_violation"),
+            "ce_oracle_violation": cm.get("ce_oracle_violation"),
+            "ce_observed_violation": cm.get("ce_observed_violation"),
+            "w_prediction_l2": cm.get("w_prediction_l2"),
+            "w_oracle_l2": cm.get("w_oracle_l2"),
+            "w_observed_l2": cm.get("w_observed_l2"),
             "features_hash": sha(sorted(map(str, feats))),
             "resolved_config_hash": sha(cfg),
             "artifact_fingerprint": file_fingerprint(adir),
@@ -268,6 +323,9 @@ def main():
             "has_cv_fold_metrics": (adir / "cv_fold_metrics.csv").exists(),
             "has_cv_errors": (adir / "cv_errors.yaml").exists(),
             "has_constraint_counts": (adir / "constraint_counts.csv").exists(),
+            "has_cv_split_manifest": (adir / "cv_split_manifest.yaml").exists(),
+            "has_fold_w_manifest": (adir / "fold_w_manifest.yaml").exists(),
+            "has_frozen_selection_receipt": (adir / "frozen_selection_receipt.yaml").exists(),
             "job_id": str(adir.relative_to(ROOT)).split("/")[0],
             "run_dir": str(adir.relative_to(ROOT)),
         })
