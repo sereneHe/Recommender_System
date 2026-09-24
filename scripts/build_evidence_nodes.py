@@ -360,6 +360,28 @@ SCRIPT_ONLY = {"A6.lag", "A6.trend", "A6.regime", "A6.huber", "A3.quantile_resid
                "A2.W_mask", "A2.W_bias_calibration", "A4.parents_limit",
                "A8.smooth_er", "A8.compositional_er", "A8.highdim",
                "A8.periodic", "A8.temporal"}
+
+# A8 subnode -> mechanism.  The oracle audit is a PRECONDITION for an A8 claim:
+# until the true-generator oracle has actually judged the constraints, a node
+# cannot read as verified.  temporal_smooth cannot be audited from a static
+# feature matrix, so it is explicitly "not_audited" and must never be folded
+# into an "NN advantage verified" conclusion.
+A8_NODE_MECHANISM = {
+    "A8.smooth_er": "smooth_additive",
+    "A8.compositional_er": "compositional",
+    "A8.highdim": "highdim_smooth",
+    "A8.periodic": "periodic",
+    "A8.temporal": "temporal_smooth",
+}
+A8_ORACLE_NOT_AUDITED = {"temporal_smooth"}
+# mechanism -> comparison id short name (A8.<short>.*)
+A8_MECHANISM_SHORT = {
+    "smooth_additive": "smooth",
+    "compositional": "compos",
+    "highdim_smooth": "highdim",
+    "periodic": "periodic",
+    "temporal_smooth": "temporal",
+}
 REGISTRY_ONLY = {"S0", "B0", "A1", "A2", "A3", "A4", "A5", "A6", "G0", "H1", "A8"}
 LITERATURE_ONLY = {"A3.KCI_HSIC", "A4.stability_selection", "A4.non_gaussian_moments"}
 NOT_IMPL_GATES = {"F0"}
@@ -479,6 +501,28 @@ for nid, parent, axis, zh, en, source, crossed, fn, comps in NODES:
         impl = "implemented"          # code path exists, no runs yet
     else:
         impl = "not_implemented"
+    # A8 oracle audit gate: an A8 subnode cannot read as verified until the
+    # true-generator oracle has judged its constraints.  temporal_smooth cannot
+    # be audited from a static feature matrix, so it is 'not_audited' and its
+    # claim is 'unverified' — it must not enter an NN-advantage conclusion.
+    oracle_audit = ""
+    if nid in A8_NODE_MECHANISM:
+        _mech = A8_NODE_MECHANISM[nid]
+        _short = A8_MECHANISM_SHORT.get(_mech, _mech)
+        _has_audit = False
+        if not idx.empty and "comparison_id" in idx.columns:
+            _a8 = idx[idx.comparison_id.astype(str).str.startswith(f"A8.{_short}.")]
+            _has_audit = bool((pd.to_numeric(_a8.get("n_clusters_used"), errors="coerce").fillna(0) > 0).any())
+        if _mech in A8_ORACLE_NOT_AUDITED:
+            oracle_audit = "not_audited"
+            claim = "unverified"
+            impl = "implemented"
+        else:
+            oracle_audit = "audited" if _has_audit else "pending"
+            if not _has_audit and claim in ("-", "", "implemented_unverified"):
+                claim = "unverified"
+    elif nid == "A8":
+        oracle_audit = "not_audited"
     if nid in RECEIPT_GATE:
         claim = receipt_state or RECEIPT_GATE[nid][1]
     elif nid in ("H1", "H1.ce_vs_nn"):
@@ -577,7 +621,7 @@ for nid, parent, axis, zh, en, source, crossed, fn, comps in NODES:
                      unique_runs=u, valid_runs=vr, paired_units=paired,
                      pooled_rel=pooled_rel, pooled_direction=pooled_dir, pooled_units=pooled_units,
                      cohorts=cohorts, cohort_claims=cohort_claims, metrics=metrics,
-                     diagnostic_only=diagnostic_only,
+                     diagnostic_only=diagnostic_only, oracle_audit=oracle_audit,
                      comparison_ids=";".join(comps), literature=LIT.get(nid, "")))
 
 out = pd.DataFrame(rows)
