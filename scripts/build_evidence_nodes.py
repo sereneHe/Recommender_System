@@ -171,9 +171,9 @@ NODES = [
      "evidence", False, N(SYN_ER, HC), []),
     ("B0.mark_100", "B0", "B0", "B0.1 Mark-100（100 棵树）", "Mark-100 (100 trees)", "evidence", False,
      lambda d: SYN_ER(d) & d.experiment.str.contains("mark_100", na=False), ["B0.tree_count.ER", "B0.mark_100.er"]),
-    ("B0.mark_cc_total100", "B0", "B0", "B0.2 Mark-CC-100（总预算 100 棵，待产物核验）",
-     "Mark-CC-100 (nominal 100-tree budget; artifact audit pending)", "code", False,
-     lambda d: SYN_ER(d) & d.solver.eq("mark_with_cc"), ["B0.mark_cc_100.er"]),
+    ("B0.mark_cc_total100", "B0", "B0", "B0.2 Mark-CC 树数对照（固定 n_outer，10 vs 100）",
+     "Mark-CC tree-count contrast (fixed n_outer; n_estimators 10 vs 100)", "evidence", False,
+     lambda d: SYN_ER(d) & d.solver.eq("mark_with_cc"), ["B0.cc_tree_count.er"]),
     ("B0.hc_nn_no_constraint", "B0", "B0", "B0.3 HC-NN 无约束基线", "HC-NN no-constraint baseline",
      "evidence", False, N(SYN_ER, HC, eq("use_ci_penalty", False), eq("use_w_constraints", False)), ["B0.hc_nn.er"]),
     ("B0.hc_w_only", "B0", "B0", "B0.4 HC-NN + W（基线臂）", "HC-NN + W (baseline arm)", "evidence", False,
@@ -386,7 +386,6 @@ REGISTRY_ONLY = {"S0", "B0", "A1", "A2", "A3", "A4", "A5", "A6", "G0", "H1", "A8
 LITERATURE_ONLY = {"A3.KCI_HSIC", "A4.stability_selection", "A4.non_gaussian_moments"}
 NOT_IMPL_GATES = {"F0"}
 OVERRIDE_CLAIM = {
-    "B0.mark_cc_total100": "open_hard_gate",
     "A1.HYBRID_ALM_PBM": "inactive_under_independence_only",
     "A4.graph_quality": "implemented_unverified",
     "A4.constraint_quality": "implemented_unverified",

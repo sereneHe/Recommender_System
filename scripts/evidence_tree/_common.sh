@@ -53,7 +53,7 @@ case "${EV_SCOPE}" in
     [[ "${PROBLEMS}" == "synthetic_sf" ]] || die "EV_SCOPE=synthetic/SF requires PROBLEMS=synthetic_sf (got ${PROBLEMS})."
     ;;
   synthetic/SmoothER|synthetic/CompositionalER|synthetic/HighDim|synthetic/Periodic|synthetic/Temporal)
-    # A7 NN-favourable mechanisms.  Each has its own problem config and MUST NOT
+    # A8 NN-favourable mechanisms.  Each has its own problem config and MUST NOT
     # be recorded as plain ER, or its evidence would be mixed with linear ER.
     [[ "${PROBLEMS}" == synthetic_* ]] || die "EV_SCOPE=${EV_SCOPE} requires a synthetic_* problem selector (got ${PROBLEMS})."
     ;;
@@ -120,6 +120,7 @@ EV_CE_BASE=(
   "solver.ce_statistic_kind=partial_correlation"
   "solver.ce_statistic_shrinkage=0.05"
   "solver.ce_residualize_method=linear"
+  "solver.ce_tolerance_mode=standard_error"
   "solver.ce_se_method=window"
   "solver.ce_cross_window_n_windows=5"
   "solver.ce_tolerance_sd_multiplier=1.96"

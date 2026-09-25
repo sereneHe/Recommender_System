@@ -20,8 +20,14 @@ EV_SCOPE="FRED"
 # synthetic_er default wins and this cohort silently runs synthetic data.
 PROBLEMS="${PROBLEMS:-FRED_16country_monthly/industry_eu_ita}"
 EXPERIMENT_PREFIX="${EXPERIMENT_PREFIX:-ET_A6_FRED}"
+# Arm selection for targeted resumes: all | comma list of ref,lag,trend,regime,huber
+A6_ARMS="${A6_ARMS:-all}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
-announce_stage "A6" "data / time / robustness (batch=${EVIDENCE_BATCH_ID})"
+announce_stage "A6" "data / time / robustness (batch=${EVIDENCE_BATCH_ID} arms=${A6_ARMS})"
+
+a6_arm_enabled() {
+  [[ "${A6_ARMS}" == "all" || ",${A6_ARMS}," == *",$1,"* ]]
+}
 
 FRED_COMMON=(
   "solver.time_limit=${TIME_LIMIT}"
@@ -57,18 +63,18 @@ FRED_COMMON=(
 )
 
 # Shared reference: default data representation, MSE loss.
-run_arm "ref" "fred_ref" "${FRED_COMMON[@]}"
+a6_arm_enabled ref && run_arm "ref" "fred_ref" "${FRED_COMMON[@]}"
 
-run_arm "A6.lag" "feature_lag_3" "${FRED_COMMON[@]}" \
+a6_arm_enabled lag && run_arm "A6.lag" "feature_lag_3" "${FRED_COMMON[@]}" \
   "+problem.feature_lag=${FEATURE_LAG:-3}"
 
-run_arm "A6.trend" "add_time_trend" "${FRED_COMMON[@]}" \
+a6_arm_enabled trend && run_arm "A6.trend" "add_time_trend" "${FRED_COMMON[@]}" \
   "+problem.add_time_trend=true"
 
-run_arm "A6.regime" "regime_break_2020" "${FRED_COMMON[@]}" \
+a6_arm_enabled regime && run_arm "A6.regime" "regime_break_2020" "${FRED_COMMON[@]}" \
   "+problem.regime_break_date=${REGIME_BREAK_DATE:-2020-03-01}"
 
-run_arm "A6.huber" "huber_loss" "${FRED_COMMON[@]}" \
+a6_arm_enabled huber && run_arm "A6.huber" "huber_loss" "${FRED_COMMON[@]}" \
   "solver.prediction_loss=huber" "solver.huber_delta=${HUBER_DELTA:-1.0}"
 
-echo "=== A6 data/time robustness complete: batch=${EVIDENCE_BATCH_ID} ==="
+echo "=== A6 data/time robustness complete: batch=${EVIDENCE_BATCH_ID} arms=${A6_ARMS} ==="

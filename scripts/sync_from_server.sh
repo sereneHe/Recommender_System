@@ -9,6 +9,11 @@ cd "$(dirname "$0")/.."
 
 SERVER_HOST="${SERVER_HOST:-tarkil}"
 SERVER_PATH="${SERVER_PATH:-/storage/brno2/home/hexiaoyu/Recommender_Pavel/metacentrum_runs}"
+# The cohort registry is authoritative on the server (reservations are minted
+# there).  Pull it too, or a locally-refreshed G0 would treat an active remote
+# cohort as unregistered and wrongly exclude it.
+SERVER_PROJECT="${SERVER_PROJECT:-/storage/brno2/home/hexiaoyu/Recommender_Pavel}"
+SERVER_REPORTS="${SERVER_REPORTS:-${SERVER_PROJECT}/reports}"
 LOCAL_DIR="${LOCAL_DIR:-metacentrum_runs}"
 SSH_OPTS="${SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=15}"
 
@@ -24,6 +29,18 @@ else
   echo "[sync] FAILED (server unreachable?) — keeping existing local mirror" >&2
   exit 2
 fi
+
+# Authoritative cohort registry + manifests (never delete local-only history:
+# use --exclude='*' style additive pull without --delete).
+for SUB in cohort_registry cohorts; do
+  mkdir -p "reports/${SUB}"
+  if rsync -az --partial -e "ssh $SSH_OPTS" \
+      "$SERVER_HOST:${SERVER_REPORTS}/${SUB}/" "reports/${SUB}/"; then
+    echo "[sync] ok  reports/${SUB} entries=$(find "reports/${SUB}" -type f | wc -l | tr -d ' ')"
+  else
+    echo "[sync] WARN could not sync reports/${SUB} (continuing)" >&2
+  fi
+done
 
 # Sync receipt: G0 may only audit a mirror whose freshness is provable.  The
 # receipt binds the refresh id, the remote snapshot time, and a hash of the

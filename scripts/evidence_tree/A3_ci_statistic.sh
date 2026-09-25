@@ -18,6 +18,15 @@ EV_SCOPE="synthetic/ER"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 announce_stage "A3" "CI/CE statistic (batch=${EVIDENCE_BATCH_ID})"
 
+# Fail before launching any expensive arm when the active source snapshot does
+# not support covariance statistics with window/HAC standard errors.  This
+# exact incompatibility stopped task1 after its reference CE runs on 2026-09-24.
+# The test also ensures the configured statistic is used rather than silently
+# falling back to partial correlation.
+CE_TEST_PYTHON="${PYTHON_BIN:-python3}"
+echo "Checking continuous-CE covariance tolerance compatibility with ${CE_TEST_PYTHON}..."
+"${CE_TEST_PYTHON}" "${REPO_ROOT}/scripts/test/test_ce_tolerances.py"
+
 # ref_ce IS the window-SE arm (EV_CE_BASE sets ce_se_method=window), so it
 # doubles as the A3.window_SE reference; no separate window arm is run.
 run_arm "ref" "ref_ce" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" \

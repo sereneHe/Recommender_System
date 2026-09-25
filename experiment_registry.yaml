@@ -68,16 +68,20 @@ hypotheses:
     effect_metric: relative_improvement
     practical_threshold: 0.05
     strong_threshold: 0.05
-    min_independent_units: 15
+    min_independent_units: 20
     unit_definition: graph_x_noise
     # Same split required; no W/DAG is used by either arm, so there is no
     # fold-W nuisance to share.
     split_contract: same
     fold_w_contract: none
+    # Frozen confirmation table.  MUST mirror A8_STAGE=confirm in
+    # scripts/test/_a8_stage.sh (graph 52-61 x noise 101-102 = 20 units) and
+    # stay disjoint from the inspected smoke/pilot units (42-44 x 101-102) and
+    # from the F0 reserved table.
     seed_table:
-      graph_seeds: [42, 43, 44, 45, 46]
-      noise_seeds: [101, 102, 103]
-    seed_table_hash: "385381feedc1362ae3dfc5bb586849dafc814e84a96c1f82c0ecddce2ba8c6e8"
+      graph_seeds: [52, 53, 54, 55, 56, 57, 58, 59, 60, 61]
+      noise_seeds: [101, 102]
+    seed_table_hash: "7cbce2fd0dbdeba7a1e7559ca5c54ad1e081ff929341b2165af633623841aa38"
     allow_diagnostic_only: false
 
   F0:
@@ -113,3 +117,6 @@ diagnostic_records:
   - id: "C0b.ce_vs_nn.ER@23896397/23908664/23918638"
     strict_inference_allowed: false
     note: "Historical pilot cohorts; seeds 42-44 were inspected, so they cannot back a confirmatory H1 claim."
+  - id: "A8.*@smoke/pilot (graph 42-44 x noise 101-102)"
+    strict_inference_allowed: false
+    note: "A8 smoke/pilot units were inspected during development (e.g. the 23998597 temporal smoke). The A8 confirmation table is graph 52-61 x noise 101-102; the inspected units must never back an A8 confirm claim."

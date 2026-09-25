@@ -1,0 +1,24 @@
+name: synthetic
+graph_type: ER
+seed: 1
+# Optional phase-1 controls.  When both are null, ``seed`` preserves the
+# historical joint graph/innovation generator.
+graph_seed: null
+noise_seed: null
+n_samples: 1000
+n_nodes: 10
+expected_edges: 15
+sem_type: gauss
+noise_scale: 1.0
+noise_df: 5.0
+target: X9
+features:
+  - X0
+  - X1
+  - X2
+  - X3
+  - X4
+  - X5
+  - X6
+  - X7
+  - X8

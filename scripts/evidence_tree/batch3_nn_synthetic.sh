@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Evidence-tree batch 3: A7 NN-favourable mechanisms (synthetic).
+# Evidence-tree batch 3: A8 NN-favourable mechanisms (synthetic).
 #
 # Each mechanism runs as its own cohort (et_a7_<mech>_v1) so the evidence
 # builder groups arms correctly and never mixes one data family with another.

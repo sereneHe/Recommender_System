@@ -36,23 +36,25 @@ run_axis A3_ci_statistic.sh              et_a3_er_v1
 run_axis A5_capacity_budget.sh           et_a5_er_v1
 run_axis B0_baselines.sh                 et_b0_er_v1
 
-# G0 contract audit is cheap and needs no cohort; run it last.
+# G0 audits the SYNCED evidence index; inside a training job there is no mirror,
+# so in-job G0 false-fails.  Defer to the post-sync refresh by default; set
+# RUN_G0=1 for an informational in-job run.
 echo
-echo "### G0 contract audit ###"
-G0_STATUS="ok"
-EVIDENCE_BATCH_ID="${EVIDENCE_BATCH_ID:-et_g0_v1}" bash "${SCRIPT_DIR}/G0_contract_audit.sh" || G0_STATUS="FAILED"
-if [[ "${G0_STATUS}" != "ok" ]]; then
-  echo
-  echo "!!! G0 CONTRACT AUDIT FAILED — batch 1 is NOT clean evidence !!!" >&2
-  # SCRIPT_DIR is scripts/evidence_tree; the project reports/ dir is two levels up.
-  G0_STATUS_DIR="${SCRIPT_DIR}/../../reports/evidence_tree"
-  mkdir -p "${G0_STATUS_DIR}"
-  echo "G0_STATUS=${G0_STATUS}" > "${G0_STATUS_DIR}/g0_status.txt" 2>/dev/null || true
+if [[ "${RUN_G0:-0}" == "1" ]]; then
+  echo "### in-job G0 contract audit (INFORMATIONAL; no synced index here) ###"
+  G0_STATUS="ok"
+  EVIDENCE_BATCH_ID="${EVIDENCE_BATCH_ID:-et_g0_v1}" bash "${SCRIPT_DIR}/G0_contract_audit.sh" || G0_STATUS="FAILED"
+  [[ "${G0_STATUS}" == "ok" ]] || echo "!!! in-job G0 did not pass (expected without synced results) !!!" >&2
+else
+  G0_STATUS="deferred_to_refresh"
+  echo "### G0 deferred to post-sync refresh: bash scripts/refresh_progress_tree.sh ###"
 fi
 
 echo
 if [[ "${G0_STATUS}" == "ok" ]]; then
-  echo "=== evidence batch 1 complete (G0 ok) ==="
+  echo "=== evidence batch 1 complete (in-job G0 ok) ==="
+elif [[ "${G0_STATUS}" == "deferred_to_refresh" ]]; then
+  echo "=== evidence batch 1 complete (G0 deferred to refresh) ==="
 else
-  echo "=== evidence batch 1 finished but G0 FAILED (see g0_status.txt) ==="
+  echo "=== evidence batch 1 finished but in-job G0 FAILED ==="
 fi

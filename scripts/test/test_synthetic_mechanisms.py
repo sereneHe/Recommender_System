@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the A7 NN-favourable synthetic mechanisms.
+"""Tests for the A8 NN-favourable synthetic mechanisms.
 
 Verify that each mechanism is deterministic, acyclic, and — critically —
 that ``oracle_fn`` really returns the TRUE structural conditional mean of the

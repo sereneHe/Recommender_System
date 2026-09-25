@@ -33,6 +33,10 @@
 
 EV_AXIS="A8"
 MECHANISM="${MECHANISM:-smooth_additive}"
+A8_STAGE="${A8_STAGE:-smoke}"
+# Arms selected for this stage.  smoke keeps the full 5-arm set; pilot/confirm/
+# locked run the CE primary question (nn0, nn_ce_true) plus the XGB baseline.
+A8_ARMS="${A8_ARMS:-nn0,nn_ce_true,nn_w_true,nn_w_ce_true,xgb100}"
 
 case "${MECHANISM}" in
   smooth_additive)   EV_SCOPE="synthetic/SmoothER";        PROBLEMS="synthetic_smooth_er";        N_NODES=20; EXPECTED_EDGES=30 ;;
@@ -47,12 +51,34 @@ export PROBLEMS N_NODES EXPECTED_EDGES
 # A8 is a larger-sample regime; do not inherit the small-ER 1000-sample default.
 N_SAMPLES="${N_SAMPLES:-10000}"
 export N_SAMPLES
-# A8 uses its own seeds; the registry pins the exact SmoothER table.
+# A8 uses its own seeds; the registry pins the exact SmoothER table.  Stage
+# scripts (scripts/test/_a8_stage.sh) set GRAPH_SEEDS/NOISE_SEEDS before this.
 export GRAPH_SEEDS="${GRAPH_SEEDS:-42 43 44 45 46}"
 export NOISE_SEEDS="${NOISE_SEEDS:-101 102 103}"
 
+# Temporal cannot be judged by the CE question until a lag-aware oracle exists.
+if [[ "${MECHANISM}" == "temporal_smooth" ]]; then
+  A8_ARMS="nn0,xgb100"
+fi
+
+arm_enabled() { [[ ",${A8_ARMS}," == *",$1,"* ]]; }
+
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
-announce_stage "A8" "NN-favourable mechanism=${MECHANISM} (batch=${EVIDENCE_BATCH_ID})"
+announce_stage "A8" "NN-favourable mechanism=${MECHANISM} stage=${A8_STAGE} arms=${A8_ARMS} (batch=${EVIDENCE_BATCH_ID})"
+
+UNITS=$(( ${#PLAN_SEEDS[@]} * ${#EV_NOISE_SEEDS[@]} ))
+echo "[A8] stage=${A8_STAGE} mechanism=${MECHANISM} graph_seeds=${GRAPH_SEEDS} noise_seeds=${NOISE_SEEDS} units=${UNITS} arms=${A8_ARMS}"
+echo "[A8] n_samples=${N_SAMPLES} n_nodes=${N_NODES} expected_edges=${EXPECTED_EDGES}"
+
+# L0 dry-run: print the resolved plan and exit WITHOUT running any Hydra job, so
+# the L0 preflight can verify config correctness with zero compute.
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+  for arm in nn0 nn_ce_true nn_w_true nn_w_ce_true xgb100; do
+    arm_enabled "${arm}" && echo "DRY_RUN arm=${arm} enabled"
+  done
+  echo "DRY_RUN: no Hydra jobs launched."
+  exit 0
+fi
 
 # XGB reference uses the same 100-round budget as B0's mark_100.
 XGB_SEED=(
@@ -77,24 +103,34 @@ else
 fi
 
 # --- NN baseline (no constraint) -------------------------------------------
-run_arm "A8" "nn0" "${EV_COMMON[@]}" "${ORACLE_OVERRIDES[@]}" \
-  "solver.constrained=false" "solver.use_w_constraints=false" \
-  "solver.use_ci_penalty=false"
+if arm_enabled nn0; then
+  run_arm "A8" "nn0" "${EV_COMMON[@]}" "${ORACLE_OVERRIDES[@]}" \
+    "solver.constrained=false" "solver.use_w_constraints=false" \
+    "solver.use_ci_penalty=false"
+fi
 
-# --- true-DAG CE only -------------------------------------------------------
-run_arm "A8" "nn_ce_true" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" "${ORACLE_OVERRIDES[@]}"
+# --- true-DAG CE only (primary question: does CE help the same NN?) ---------
+if arm_enabled nn_ce_true; then
+  run_arm "A8" "nn_ce_true" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" "${ORACLE_OVERRIDES[@]}"
+fi
 
-# --- true-DAG W only --------------------------------------------------------
-run_arm "A8" "nn_w_true" "${EV_COMMON[@]}" "${ORACLE_OVERRIDES[@]}" \
-  "solver.constrained=true" "solver.use_w_constraints=true" "solver.use_ci_penalty=false" \
-  "solver.w_constraint_mode=legacy_global"
+# --- true-DAG W only (secondary; not in pilot/confirm main screen) ----------
+if arm_enabled nn_w_true; then
+  run_arm "A8" "nn_w_true" "${EV_COMMON[@]}" "${ORACLE_OVERRIDES[@]}" \
+    "solver.constrained=true" "solver.use_w_constraints=true" "solver.use_ci_penalty=false" \
+    "solver.w_constraint_mode=legacy_global"
+fi
 
-# --- true-DAG W + CE --------------------------------------------------------
-run_arm "A8" "nn_w_ce_true" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" "${ORACLE_OVERRIDES[@]}" \
-  "solver.use_w_constraints=true" "solver.w_constraint_mode=legacy_global"
+# --- true-DAG W + CE (secondary) --------------------------------------------
+if arm_enabled nn_w_ce_true; then
+  run_arm "A8" "nn_w_ce_true" "${EV_COMMON[@]}" "${EV_CE_BASE[@]}" "${ORACLE_OVERRIDES[@]}" \
+    "solver.use_w_constraints=true" "solver.w_constraint_mode=legacy_global"
+fi
 
-# --- XGB reference (fixed 100 rounds) --------------------------------------
-EV_SOLVER="mark"
-run_arm "A8" "xgb100" "${XGB_SEED[@]}" "solver.n_estimators=100"
+# --- XGB reference (fixed 100 rounds; horizontal baseline only) -------------
+if arm_enabled xgb100; then
+  EV_SOLVER="mark"
+  run_arm "A8" "xgb100" "${XGB_SEED[@]}" "solver.n_estimators=100"
+fi
 
 echo "=== A8 ${MECHANISM} complete: batch=${EVIDENCE_BATCH_ID} ==="

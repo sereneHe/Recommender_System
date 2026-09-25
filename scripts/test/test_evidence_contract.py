@@ -11,6 +11,7 @@ the evidence builder) so they run anywhere the builder runs.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -121,6 +122,43 @@ class TestRegistry(unittest.TestCase):
             reg.seed_combinations(f0["reserved_holdout_seed_table"])
         )
         self.assertEqual(overlap, set())
+
+    @staticmethod
+    def _stage_seeds(stage: str) -> tuple[list[int], list[int]]:
+        """Read the graph/noise seeds a stage of scripts/test/_a8_stage.sh declares."""
+        script = ROOT / "scripts" / "test" / "_a8_stage.sh"
+        proc = subprocess.run(
+            ["bash", "-c",
+             f'set -e; A8_STAGE="{stage}"; source "{script}"; '
+             'printf "%s|%s" "${GRAPH_SEEDS}" "${NOISE_SEEDS}"'],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            raise AssertionError(f"_a8_stage.sh {stage} failed: {proc.stderr}")
+        graph, noise = proc.stdout.strip().split("|")
+        return [int(x) for x in graph.split()], [int(x) for x in noise.split()]
+
+    def test_a8_registry_table_matches_confirm_stage(self):
+        """The frozen A8 table MUST equal A8_STAGE=confirm in _a8_stage.sh."""
+        graph, noise = self._stage_seeds("confirm")
+        a8 = reg.hypothesis(self.registry, "A8")
+        self.assertEqual(a8["seed_table"]["graph_seeds"], graph)
+        self.assertEqual(a8["seed_table"]["noise_seeds"], noise)
+        self.assertEqual(reg.seed_table_units(a8["seed_table"]),
+                         a8["min_independent_units"])
+        self.assertEqual(reg.seed_table_hash(a8["seed_table"]),
+                         a8["seed_table_hash"])
+
+    def test_a8_confirm_seeds_disjoint_from_inspected_stages(self):
+        """Confirmation must not reuse smoke/pilot or the F0 locked holdout."""
+        a8 = reg.hypothesis(self.registry, "A8")
+        confirm = set(reg.seed_combinations(a8["seed_table"]))
+        for stage in ("smoke", "pilot", "locked"):
+            graph, noise = self._stage_seeds(stage)
+            inspected = set(reg.seed_combinations(
+                {"graph_seeds": graph, "noise_seeds": noise}))
+            self.assertEqual(confirm & inspected, set(),
+                             f"A8 confirm overlaps inspected stage {stage}")
 
     def test_duplicate_cohort_reservation_fails(self):
         with tempfile.TemporaryDirectory() as d:
@@ -336,19 +374,27 @@ class TestH1Protocol(unittest.TestCase):
 
 
 class TestPipelineState(unittest.TestCase):
-    def test_registered_before_h1_cohort(self):
+    def test_pipeline_state_never_overclaims(self):
         sys.path.insert(0, str(ROOT / "scripts" / "evidence_tree"))
         import pipeline_state
         payload = pipeline_state.build()
-        # A clean checkout has no cohort manifest, so the machine must sit at
-        # "registered".  On an operator machine that already submitted H1 this
-        # is "submitted"/"running"; either way NO method verdict may appear.
-        if not (ROOT / "reports" / "cohorts").exists() or not list(
-                (ROOT / "reports" / "cohorts").glob("*.yaml")):
-            self.assertEqual(payload["state"], "registered")
-        self.assertNotIn(payload["state"], ("validated", "frozen", "holdout confirmed"))
-        self.assertEqual(payload["h1"]["used"], 0)
+        st = payload["state"]
+        # The machine may legitimately reach "validated" once H1 is 20/20 and G0
+        # passes; what it must NEVER do is jump to frozen/holdout without the
+        # matching receipt, or claim a verdict with no paired data.
+        self.assertIn(st, {"registered", "submitted", "running", "synced",
+                           "gate_failed", "validated", "frozen",
+                           "holdout confirmed", "invalid"})
+        if st == "frozen":
+            self.assertTrue(payload.get("frozen_receipts"))
+        if st == "holdout confirmed":
+            self.assertTrue(payload.get("holdout_receipts"))
+        self.assertGreaterEqual(payload["h1"]["used"], 0)
+        self.assertLessEqual(payload["h1"]["used"], payload["h1"]["expected"])
         self.assertEqual(payload["h1"]["expected"], 20)
+        # Clean checkout (no cohort, nothing paired) must sit at "registered".
+        if payload["h1"]["used"] == 0 and not payload.get("cohort_manifests"):
+            self.assertEqual(st, "registered")
 
     def test_dashboard_state_exposes_gates(self):
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -483,10 +529,24 @@ class TestCanonicalAttempt(unittest.TestCase):
 class TestA8NNfavorable(unittest.TestCase):
     """A8 NN-favourable axis is wired: scopes, comparisons, nodes, registry."""
 
-    def test_registry_has_a8_with_fifteen_units(self):
+    def test_stage_helper_defines_four_stages(self):
+        text = (ROOT / "scripts" / "test" / "_a8_stage.sh").read_text(encoding="utf-8")
+        for stage in ("smoke", "pilot", "confirm", "locked"):
+            self.assertIn(f"{stage})", text)
+        # temporal must be forced to nn0,xgb100 (no CE before lag-aware oracle)
+        self.assertIn('A8_ARMS="nn0,xgb100"', text)
+        # confirm uses NEW seeds disjoint from pilot
+        self.assertIn("52 53 54 55 56 57 58 59 60 61", text)
+        # locked reuses the existing F0 reserved table
+        self.assertIn("1001 1002 1003 1004 1005", text)
+
+    def test_registry_a8_table_matches_confirm_stage(self):
         h = reg.hypothesis(reg.load(REGISTRY_PATH), "A8")
         self.assertEqual(h["scope"], "synthetic/SmoothER")
-        self.assertEqual(reg.seed_table_units(h["seed_table"]), 15)
+        # Must equal A8_STAGE=confirm (graph 52-61 x noise 101-102 = 20 units),
+        # see test_a8_registry_table_matches_confirm_stage for the full check.
+        self.assertEqual(reg.seed_table_units(h["seed_table"]), 20)
+        self.assertEqual(h["min_independent_units"], 20)
         self.assertEqual(h["practical_threshold"], 0.05)
 
     def test_index_has_a8_comparisons_for_every_mechanism(self):

@@ -608,6 +608,11 @@ COMPARISONS = [
      "EV:B0.hc_w_ce:hc_w_ce", "mechanism", "ce", req(use_w_constraints=True, use_ci_penalty=True)),
     ("B0.hc_w_ce_vs_ce.er", "B0", "synthetic/ER", "EV:B0.hc_ce_only:hc_ce_only",
      "EV:B0.hc_w_ce:hc_w_ce", "mechanism", "w", req(use_w_constraints=True, use_ci_penalty=True)),
+    # Fair Mark-CC tree-count contrast: SAME n_outer (graph-refit budget), only
+    # n_estimators changes (10 vs 100).  The legacy cc comparison (which also
+    # changed n_outer) is not used for a tree-count or Mark-CC claim.
+    ("B0.cc_tree_count.er", "B0", "synthetic/ER", "EV:B0.mark_cc_10:mark_cc_10",
+     "EV:B0.mark_cc_100:mark_cc_100", "mechanism", "trees", None),
 ]
 
 # ---- A8: NN-favourable mechanisms (own scopes; never mixed with linear ER) --
