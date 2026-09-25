@@ -1,16 +1,17 @@
-# Allowlist for syncing Recommender_Pavel closed-loop + method code to
-# github/current-experiments.  Only these paths may be uploaded.  Data binaries,
-# runtime reports and logs are refused by scripts/git_sync.py even if listed.
+# Allowlist: Recommender_Pavel closed-loop + method code -> github/current-experiments
 #
-# closed-loop
+# EXPLICIT paths only.  Deliberately NOT included (too broad / not method):
+#   scripts/backup/  scripts/plot/  docs/  notears/  dagsolvers/
+#   top-level *.py (listed individually below)  *.ipynb  whole experiments_conf/
+# scripts/git_sync.py also refuses data/, reports/, *.pkl, .DS_Store, *.log.
+#
+# --- closed-loop ---
 experiment_registry.yaml
 .gitignore
 closed_loop_method_manifest.txt
 dashboard_manifest.txt
-scripts/evidence_tree
-scripts/test
-scripts/experiment_registry.py
 scripts/git_sync.py
+scripts/experiment_registry.py
 scripts/build_evidence_index.py
 scripts/build_evidence_nodes.py
 scripts/build_progress_tree.py
@@ -21,38 +22,65 @@ scripts/refresh_progress_tree.sh
 scripts/sync_from_server.sh
 scripts/python_runtime.sh
 scripts/check_metric_integrity.py
-scripts/evidence_tree_ce_priority.sh
-scripts/evidence_tree_config_repair.sh
-# method / experiment drivers
+scripts/evidence_tree
+scripts/test
+# --- method: plan + explicit experiment drivers ---
 scripts/causal_predictor_plan
-scripts/plot
-scripts/backup
 scripts/constraints_count.py
-scripts/experiments_ce_*.sh
-scripts/experiments_recommender_*.sh
-scripts/plot*.sh
+scripts/experiments_ce_new_recommender_codiet.sh
+scripts/experiments_ce_new_recommender_codiet_all.sh
+scripts/experiments_ce_new_recommender_er.sh
+scripts/experiments_ce_new_recommender_er_p1p2.sh
+scripts/experiments_ce_new_recommender_er_sf_industry.sh
+scripts/experiments_ce_new_recommender_industry.sh
+scripts/experiments_ce_new_recommender_sf.sh
+scripts/experiments_ce_new_recommender_suite.sh
+scripts/experiments_ce_recommender_codiet.sh
+scripts/experiments_ce_recommender_codiet1.sh
+scripts/experiments_ce_recommender_industry.sh
+scripts/experiments_recommender_cds.sh
+scripts/experiments_recommender_codiet.sh
+scripts/experiments_recommender_industry.sh
+scripts/experiments_recommender_industry1.sh
+scripts/experiments_recommender_synthetic.sh
+scripts/experiments_recommender_sythetic.sh
 scripts/summary_industry.sh
 scripts/test_hc_ce_stability.sh
 scripts/test_hc_stability.sh
-scripts/replay_*.sh
+scripts/replay_er_sf_baselines.sh
+scripts/replay_industry_baselines.sh
 scripts/dashboard_refresh_multirun_mlflow.sh
 scripts/launch_evidence_dashboard.command
-# method modules / configs
-*.py
-experiments_conf
+scripts/evidence_tree_ce_priority.sh
+scripts/evidence_tree_config_repair.sh
+# --- method modules (explicit; no *.py glob) ---
+artifact_utils.py
+cds_utils.py
+compute_tools.py
+data_helper.py
+experiments_utils.py
 hc_predictor.py
 hc_predictor_ce.py
+hc_predictor_ci.py
+hei.py
+industry_utils.py
+mk_utils.py
+multirun_summary_mlflow.py
+nn_causal_constraints_lagrangian.py
+nn_lagrangian.py
+recommender.py
 recommender_estimator.py
 recommender_utils.py
-nn_causal_constraints_lagrangian.py
-xgboost_lagrangian.py
+run_experiments.py
+sachs_utils.py
 solve_milp.py
+synthetic_utils.py
 tune_causal_discovery_emukit.py
-industry_utils.py
-multirun_summary_mlflow.py
+utils.py
+xgboost_lagrangian.py
 requirements.txt
-# method-related supporting code / docs / infra
+# --- configs (subdirs, not the whole experiments_conf tree) ---
+experiments_conf/solver
+experiments_conf/problem
+# --- submission infra ---
 cluster_computing
-dagsolvers
-notears
-docs

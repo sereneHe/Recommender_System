@@ -510,10 +510,13 @@ def add_lag_features(samples_df, lag: int, columns=None, suffix: str = "_lag"):
     """Append ``k`` lagged copies of the predictor columns to a synthetic frame.
 
     ``add_lag_features(df, 1)`` turns ``X_t`` into the ``[X_t, X_{t-1}]`` input
-    tier.  The first ``lag`` rows have no predecessor; they are zero-filled and
-    the caller is expected to drop them (the generator's own lag block does the
-    same).  ``columns`` defaults to every column except the last, matching the
-    synthetic ``[features..., target]`` layout.
+    tier.  The first ``lag`` rows have no predecessor, so their lag columns are
+    left **NaN** (``Series.shift``), not zero: an undefined predictor is marked
+    missing and the caller must drop those rows through a shared row mask.  (The
+    generator's internal ``temporal_parent_blocks`` zero-fills instead, because
+    it must reproduce its own recurrence; do not conflate the two.)  ``columns``
+    defaults to every column except the last, matching the synthetic
+    ``[features..., target]`` layout.
     """
     lag = int(lag)
     if lag < 0:

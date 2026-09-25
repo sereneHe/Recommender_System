@@ -2,6 +2,7 @@
 """Tests for the manifest-scoped git sync tool (scripts/git_sync.py)."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,40 @@ class TestManifestSync(unittest.TestCase):
         branches = subprocess.run(["git", "--git-dir", str(self.remote), "branch", "--list"],
                                   capture_output=True, text=True).stdout
         self.assertIn("current-experiments", branches)
+
+    def test_invalid_target_is_rejected(self):
+        code, info = git_sync.sync(self.work, self.manifest, "github",
+                                   "current-experiments", None, None, target="nonsense")
+        self.assertEqual(code, 2)
+        self.assertEqual(info["status"], "invalid_target")
+
+    def test_refuses_when_staged_outside_manifest(self):
+        (self.work / "outside.txt").write_text("x")
+        _git(self.work, "add", "--", "outside.txt")   # staged, but not in manifest
+        (self.work / "code.py").write_text("a")
+        code, info = git_sync.sync(self.work, self.manifest, "github",
+                                   "current-experiments", None, None)
+        self.assertEqual(code, 1)
+        self.assertEqual(info["status"], "refused_staged_outside_manifest")
+        self.assertIn("outside.txt", info["staged_outside_manifest"])
+        # nothing was pushed
+        status = _git(self.work, "status", "--porcelain").stdout
+        self.assertIn("code.py", status)
+
+    def test_receipt_has_unified_schema(self):
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as d:
+            (self.work / "code.py").write_text("a")
+            code, _ = git_sync.sync(self.work, self.manifest, "github",
+                                    "current-experiments", "m", Path(d), target="method")
+            self.assertEqual(code, 0)
+            receipt = json.loads((Path(d) / "latest-method.json").read_text())
+            for key in ("target", "repository", "branch", "manifest_hash",
+                        "pre_sync_commit", "post_sync_commit",
+                        "remote_commit_before", "remote_commit_after",
+                        "uploaded", "excluded", "synced_at_utc"):
+                self.assertIn(key, receipt)
+            self.assertEqual(receipt["target"], "method")
 
 
 if __name__ == "__main__":

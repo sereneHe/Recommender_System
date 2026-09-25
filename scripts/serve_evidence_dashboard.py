@@ -42,19 +42,28 @@ DASHBOARD_MANIFEST = ROOT / "dashboard_manifest.txt"
 
 
 def git_target(name: str) -> dict:
-    """Return the manifest/remote/branch triple for a sync target."""
-    if str(name).strip().lower() == "dashboard":
+    """Return the manifest/remote/branch triple for a sync target.
+
+    Only 'method' and 'dashboard' are valid; anything else raises, so an unknown
+    target can never silently sync to the method branch.
+    """
+    name = str(name).strip().lower()
+    if name == "dashboard":
         return dict(root=DASHBOARD_ROOT, manifest=DASHBOARD_MANIFEST,
                     remote=os.environ.get("DASHBOARD_GIT_REMOTE", "dashboard-app"),
                     branch=os.environ.get("DASHBOARD_GIT_BRANCH", "main"))
-    return dict(root=ROOT, manifest=METHOD_MANIFEST,
-                remote=os.environ.get("GIT_SYNC_REMOTE", "github"),
-                branch=os.environ.get("GIT_SYNC_BRANCH", "current-experiments"))
+    if name == "method":
+        return dict(root=ROOT, manifest=METHOD_MANIFEST,
+                    remote=os.environ.get("GIT_SYNC_REMOTE", "github"),
+                    branch=os.environ.get("GIT_SYNC_BRANCH", "current-experiments"))
+    raise ValueError(f"unknown git sync target: {name!r} (expected method|dashboard)")
 
 
 def _query_target(path: str) -> str:
     if "target=dashboard" in path:
         return "dashboard"
+    if "target=method" in path:
+        return "method"
     return "method"
 
 
@@ -484,7 +493,8 @@ class Handler(BaseHTTPRequestHandler):
             message = payload.get("message") or None
             try:
                 code, info = git_sync.sync(**git_target(target), message=message,
-                                           receipt_path=REPORTS / "git_sync_receipt.json")
+                                           receipt_dir=REPORTS / "audit" / "git_sync",
+                                           target=target)
                 self._send(200 if code == 0 else 502,
                            json.dumps(info, ensure_ascii=False).encode(), "application/json")
             except Exception as exc:  # pragma: no cover - defensive

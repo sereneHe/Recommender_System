@@ -1,22 +1,30 @@
-# Allowlist for syncing the dashboard repository itself to github/dashboard-app.
-# Paths are relative to the dashboard repo root (used with --root <dashboard>).
-# Never includes node_modules, data/, dist/, build/, .wrangler, logs (.gitignore
-# + git_sync.py forbidden rules also enforce this).
+# Allowlist: dashboard repository -> github/dashboard-app
+# Paths are relative to the dashboard repo root (--root <dashboard>).
+# Explicit only; excludes output/, tmp/, work/, site-version.tar.gz,
+# node_modules, data/, dist/, build/, .wrangler (also ignored by .gitignore).
 backend
 app
+assets
+db
+drizzle
+examples
+macos
+public
+scripts
 tests
+tooling
+tools
+worker
 start.sh
 package.json
 package-lock.json
 tsconfig.json
-next.config.*
-postcss.config.*
-eslint.config.*
-drizzle.config.*
-vite.config.*
-wrangler.*
-components
-lib
-public
+next.config.ts
+postcss.config.mjs
+eslint.config.mjs
+drizzle.config.ts
+vite.config.ts
 README.md
 .gitignore
+启动自动发文章Dashboard.command
+导出Codex聊天与代码.command
