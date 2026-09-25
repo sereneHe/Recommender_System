@@ -156,26 +156,248 @@ def read_json_dir(path: Path):
     return out
 
 
+def read_yaml_file(path: Path):
+    try:
+        import yaml as _yaml
+        return _yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+# Fallback decision-tree spec; the live source is `decision_tree:` in
+# experiment_registry.yaml (kept in sync with this default).
+DEFAULT_DECISION_TREE = {
+    "root": {
+        "id": "H1", "node_id": "H1", "role": "target_evidence",
+        "zh": "核心假设 H1：CE-only 是否优于匹配 NN（合成 ER）",
+        "en": "Core hypothesis H1: is CE-only better than a matched NN (synthetic ER)?",
+    },
+    "branches": [
+        {"id": "pairing", "role": "target_evidence", "node_id": "H1", "target": 20,
+         "zh": "预注册配对：20 个独立 graph×noise 单位",
+         "en": "Pre-registered pairs: 20 independent graph×noise units"},
+        {"id": "gates", "role": "required_gate", "gate": "G0_H1",
+         "zh": "公平比较合同 G0", "en": "Fair-comparison contract G0",
+         "children": [
+             {"node_id": "G0.3_exact_split_hash", "zh": "相同 split", "en": "Same split"},
+             {"node_id": "G0.5_fold_W_cache_hash", "zh": "相同 fold-W cache", "en": "Same fold-W cache"},
+             {"node_id": "G0.6_frozen_selection_receipt", "zh": "冻结选择收据", "en": "Frozen selection receipt"},
+         ]},
+        {"id": "historic", "role": "historic_signal", "parent_node": "A3.partial_correlation",
+         "zh": "历史机制线索 A3", "en": "Historical mechanism clues A3",
+         "children": [
+             {"node_id": "A3.pcorr.linear_ER", "zh": "线性 ER · 偏相关", "en": "Linear ER · partial corr"},
+             {"node_id": "A3.pcorr.nonlinear_ER", "zh": "非线性 ER · 偏相关", "en": "Nonlinear ER · partial corr"},
+             {"node_id": "A3.pcorr.SF", "zh": "SF · 偏相关", "en": "SF · partial corr"},
+         ]},
+        {"id": "baseline", "role": "required_gate", "node_id": "B0",
+         "zh": "基线校准 B0", "en": "Baseline calibration B0",
+         "require_children": ["B0.mark_100", "B0.mark_cc_total100"],
+         "gap_zh": "Mark-CC-100 未满足", "gap_en": "Mark-CC-100 unmet"},
+        {"id": "holdout", "role": "holdout", "node_id": "F0",
+         "zh": "最终独立验证 F0", "en": "Final independent validation F0"},
+    ],
+    "candidate_library": ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"],
+}
+
+AXIS_LABELS = {
+    "A1": ("A1 优化器与后端", "A1 Optimizer & backend"),
+    "A2": ("A2 约束嵌入", "A2 Constraint embedding"),
+    "A3": ("A3 条件独立统计量", "A3 Conditional-independence statistics"),
+    "A4": ("A4 图估计与先验", "A4 Graph estimation & priors"),
+    "A5": ("A5 模型容量与预算", "A5 Model capacity & budget"),
+    "A6": ("A6 数据、时间与鲁棒损失", "A6 Data, time & robust loss"),
+    "A7": ("A7 CoDiet 类型匹配约束", "A7 CoDiet type-matched constraints"),
+    "A8": ("A8 平滑/组合非线性", "A8 Smooth/compositional nonlinearity"),
+}
+
+
+def _st(key: str, sym: str, zh: str, en: str) -> dict:
+    return {"key": key, "sym": sym, "zh": zh, "en": en}
+
+
+def _unmet(node: dict) -> bool:
+    claim = str(node.get("claim") or "")
+    return claim in ("", "-", "missing", "open", "implemented_unverified", "unverified") \
+        or str(node.get("evidence") or "") == "missing"
+
+
+def _signal_status(node: dict) -> dict:
+    """Low-power mechanism clue -> direction + k, never a conclusion."""
+    claim = str(node.get("claim") or "")
+    k = node.get("paired_units") or 0
+    if "supported" in claim:
+        zh, en = "正向", "positive"
+    elif "contradicted" in claim:
+        zh, en = "反向", "negative"
+    elif "equivalent" in claim:
+        zh, en = "近零", "near-zero"
+    else:
+        direction = str(node.get("pooled_direction") or "-")
+        mapped = {"positive": ("正向", "positive"), "negative": ("反向", "negative"),
+                  "mixed": ("混合", "mixed")}.get(direction)
+        if mapped:
+            zh, en = mapped
+        else:
+            try:
+                rel = float(node.get("pooled_rel"))
+            except (TypeError, ValueError):
+                rel = None
+            if rel is None:
+                zh, en = "未定", "undetermined"
+            elif rel > 0.02:
+                zh, en = "正向", "positive"
+            elif rel < -0.02:
+                zh, en = "反向", "negative"
+            else:
+                zh, en = "近零", "near-zero"
+    return _st("clue", "⚠", f"{zh} · k={k}", f"{en} · k={k}")
+
+
+def build_conclusion(nodes: list, pipeline: dict, gates: dict, spec: dict) -> dict:
+    by = {str(n.get("node_id")): n for n in nodes}
+    pipeline = pipeline or {}
+    h1_pipe = pipeline.get("h1") or {}
+    used = int(h1_pipe.get("used") or 0)
+    expected = int(h1_pipe.get("expected") or spec["branches"][0].get("target") or 20)
+    claim = str(by.get("H1", {}).get("claim") or "")
+    frozen = pipeline.get("frozen_receipts") or []
+    holdout = pipeline.get("holdout_receipts") or []
+
+    if "supported" in claim and "low_power" not in claim:
+        conclusion_zh, conclusion_en = "H1 已获支持：CE-only 优于匹配 NN", "H1 supported: CE-only beats matched NN"
+        root_status = _st("ok", "✓", "已形成结论", "Conclusion reached")
+    else:
+        conclusion_zh, conclusion_en = "尚无有效方法结论", "No valid method conclusion yet"
+        root_status = _st("none", "□", "未形成结论", "No conclusion yet")
+
+    branches = []
+    for b in spec["branches"]:
+        role = b.get("role")
+        entry = {"id": b.get("id"), "zh": b.get("zh", ""), "en": b.get("en", "")}
+        if role == "target_evidence":
+            label = f"已登记 · k={used}/{expected}" if used >= expected and expected else (
+                f"进行中 · k={used}/{expected}" if used else f"尚未登记 · k=0/{expected}")
+            en_label = f"Registered · k={used}/{expected}" if used >= expected and expected else (
+                f"In progress · k={used}/{expected}" if used else f"Not registered · k=0/{expected}")
+            key = "progress" if used else "none"
+            entry["status"] = _st(key, "◐" if used else "□", label, en_label)
+        elif role == "required_gate":
+            children = []
+            if b.get("children"):
+                for ch in b["children"]:
+                    n = by.get(ch["node_id"], {})
+                    c = str(n.get("claim") or "")
+                    if "passed" in c:
+                        cs = _st("ok", "✓", "已核验", "Verified")
+                    elif c == "open" or _unmet(n):
+                        cs = _st("none", "□", "未核验", "Not verified")
+                    else:
+                        cs = _st("clue", "⚠", c or "待核验", c or "Pending")
+                    children.append({"id": ch["node_id"], "zh": ch.get("zh", ""), "en": ch.get("en", ""), "status": cs})
+                entry["children"] = children
+            if b.get("gate"):
+                gate = (gates or {}).get(b["gate"]) or {}
+                gstatus = str(gate.get("status") or "open")
+                failures = gate.get("failures") or []
+                if gstatus == "failed":
+                    entry["status"] = _st("gate", "⊠", f"{len(failures)} 项硬门未满足", f"{len(failures)} hard gate(s) unmet")
+                elif gstatus == "passed":
+                    entry["status"] = _st("ok", "✓", "门已通过", "Gate passed")
+                else:
+                    entry["status"] = _st("none", "□", "未核验", "Not verified")
+            else:
+                unmet = [c for c in (b.get("require_children") or []) if _unmet(by.get(c, {}))]
+                if unmet:
+                    entry["status"] = _st("gate", "⊠", b.get("gap_zh", "未满足"), b.get("gap_en", "Unmet"))
+                else:
+                    entry["status"] = _st("ok", "✓", "已校准", "Calibrated")
+        elif role == "historic_signal":
+            children = []
+            any_low = False
+            for ch in b.get("children") or []:
+                n = by.get(ch["node_id"], {})
+                if "low_power" in str(n.get("claim") or ""):
+                    any_low = True
+                children.append({"id": ch["node_id"], "zh": ch.get("zh", ""), "en": ch.get("en", ""),
+                                 "status": _signal_status(n)})
+            entry["children"] = children
+            entry["status"] = _st("clue", "⚠",
+                                  "低功效，仅作线索" if any_low else "仅作线索",
+                                  "Low power — clue only" if any_low else "Clue only")
+        elif role == "holdout":
+            n = by.get(b.get("node_id"), {})
+            if holdout:
+                entry["status"] = _st("progress", "◐", "holdout 进行中", "Holdout running")
+            elif _unmet(n):
+                entry["status"] = _st("none", "□", "尚未开始", "Not started")
+            else:
+                entry["status"] = _st("progress", "◐", "进行中", "In progress")
+        else:
+            entry["status"] = _st("none", "□", "未取证", "No evidence")
+        branches.append(entry)
+
+    gate = (gates or {}).get("G0_H1") or {}
+    gstatus = str(gate.get("status") or "open")
+    if not (expected and used >= expected):
+        next_zh, next_en = f"完成 H1 的 {expected} 个冻结配对", f"Complete H1's {expected} frozen pairs"
+    elif gstatus != "passed":
+        next_zh, next_en = "通过 G0", "Pass G0"
+    elif not frozen:
+        next_zh, next_en = "人工冻结 → F0 holdout", "Human freeze → F0 holdout"
+    elif not holdout:
+        next_zh, next_en = "运行 F0 holdout", "Run the F0 holdout"
+    else:
+        next_zh, next_en = "发布结论", "Publish conclusion"
+
+    axes = []
+    total = 0
+    for ax in spec.get("candidate_library") or []:
+        count = sum(1 for n in nodes if str(n.get("axis")) == ax)
+        total += max(1, count)
+        zh, en = AXIS_LABELS.get(ax, (ax, ax))
+        axes.append({"id": ax, "zh": zh, "en": en, "count": count})
+
+    root = spec["root"]
+    return {
+        "question_zh": root.get("zh", ""),
+        "question_en": root.get("en", ""),
+        "conclusion_zh": conclusion_zh,
+        "conclusion_en": conclusion_en,
+        "next_zh": next_zh,
+        "next_en": next_en,
+        "root": {"id": root.get("node_id", "H1"), "zh": root.get("zh", ""), "en": root.get("en", ""), "status": root_status},
+        "branches": branches,
+        "candidate_library": {"count": sum(int(a["count"]) for a in axes), "axes": axes},
+    }
+
+
 def state():
+    nodes = read_csv(REPORTS / "evidence_nodes.csv")
+    pipeline = read_json(REPORTS / "pipeline_state.json")
+    gate_map = {"G0_H1": read_json(REPORTS / "gates" / "G0_H1.json")}
+    registry = read_yaml_file(ROOT / "experiment_registry.yaml")
+    spec = registry.get("decision_tree") if isinstance(registry, dict) else None
+    if not isinstance(spec, dict) or "root" not in spec:
+        spec = DEFAULT_DECISION_TREE
     return {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "integrity": integrity(),
+        "conclusion": build_conclusion(nodes, pipeline, gate_map, spec),
         # Pipeline state machine: registered / submitted / running / synced /
         # gate_failed / gate_passed(=validated) / frozen / holdout_running /
         # holdout_confirmed.  Every transition is decided by a durable receipt,
         # never by a chart.  Paths below match the on-disk layout exactly:
         # reports/cohort_registry/<id>/record.json,
         # reports/cohorts/<id>.yaml, reports/holdout_receipts/<cohort>.json.
-        "pipeline": read_json(REPORTS / "pipeline_state.json"),
-        "gates": {
-            "G0_H1": read_json(REPORTS / "gates" / "G0_H1.json"),
-        },
+        "pipeline": pipeline,
+        "gates": gate_map,
         "sync": read_json(REPORTS / "sync_receipt.json"),
         "cohort_registry": read_json_dir(REPORTS / "cohort_registry"),
         "cohort_manifests": read_yaml_dir(REPORTS / "cohorts"),
         "holdout_receipts": read_json_dir(REPORTS / "holdout_receipts"),
         "frozen_selection": read_yaml_dir(REPORTS / "frozen_selection"),
-        "nodes": read_csv(REPORTS / "evidence_nodes.csv"),
+        "nodes": nodes,
         "comparisons": read_csv(REPORTS / "evidence_index.csv"),
         "exclusions": read_csv(REPORTS / "evidence_exclusions.csv"),
         "pairs": read_csv(REPORTS / "evidence_pairs.csv"),
@@ -313,7 +535,21 @@ I18N_BRIDGE = r'''<script id="dashboard-i18n-bridge">
     "进行中 · 待配对": "In progress · awaiting pairing",
     "配对无效": "Pairing invalid",
     "文献假设：": "Literature hypothesis: ",
-    "比较明细": "Comparison details"
+    "比较明细": "Comparison details",
+    "结论树": "Conclusion tree",
+    "审计树": "Audit tree",
+    "当前结论": "Current conclusion",
+    "下一步": "Next step",
+    "候选方法库": "Candidate library",
+    "项": "items",
+    "结论树 · Evidence Tree": "Conclusion tree · Evidence Tree",
+    "完整审计树 · Evidence Tree（全部节点、u/v、收据、哈希）": "Full audit tree · Evidence Tree (all nodes, u/v, receipts, hashes)",
+    "✓ 已证": "✓ Proven",
+    "⚠ 线索": "⚠ Clue",
+    "◐ 进行中": "◐ In progress",
+    "□ 未取证": "□ No evidence",
+    "⊠ 硬门": "⊠ Hard gate",
+    "结论树只回答当前主假设；完整证据、u/v、收据与哈希在“审计树”。": "The conclusion tree answers only the current hypothesis; full evidence, u/v, receipts and hashes live in the audit tree."
   };
   var PATTERNS = [
     [/^待钉 · 正向 k=(.+)$/, "To pin · forward k=$1", /^To pin · forward k=(.+)$/, "待钉 · 正向 k=$1"],
@@ -471,6 +707,16 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/git/preview"):
             try:
                 info = git_sync.preview(**git_target(_query_target(self.path)))
+                self._send(200, json.dumps(info, ensure_ascii=False).encode(), "application/json")
+            except Exception as exc:  # pragma: no cover - defensive
+                self._send(500, json.dumps({"error": str(exc)}).encode(), "application/json")
+        elif self.path.startswith("/api/git/verify"):
+            # Re-check the latest immutable receipt against the live remote.
+            try:
+                tgt = _query_target(self.path)
+                cfg = git_target(tgt)
+                info = git_sync.verify(cfg["root"], cfg["manifest"], cfg["remote"],
+                                       cfg["branch"], REPORTS / "audit" / "git_sync", tgt)
                 self._send(200, json.dumps(info, ensure_ascii=False).encode(), "application/json")
             except Exception as exc:  # pragma: no cover - defensive
                 self._send(500, json.dumps({"error": str(exc)}).encode(), "application/json")

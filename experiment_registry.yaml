@@ -108,6 +108,73 @@ hypotheses:
     reserved_holdout_seed_table_hash: "826570def5657134896d2c5949e8e918bd71c756116d15aee7d9c2f75b614b63"
     allow_diagnostic_only: false
 
+# Conclusion-tree composition.
+#
+# The DEFAULT view of the evidence dashboard is rendered from this section, not
+# from the raw search space, so it answers exactly one question: does the
+# current target hypothesis hold?  Every entry carries a `decision_role`:
+#   * target_evidence   - the pre-registered unit budget for the target H1
+#   * required_gate      - a fairness / baseline gate that must pass first
+#   * historic_signal    - low-power mechanism clues (never a conclusion)
+#   * holdout            - the final independent validation
+#   * candidate_library  - the search space (A1-A8); folded, audit-only
+# The full registry (A1-A8, audit receipts, hashes, metrics) stays available in
+# the audit view; only the decision chain is promoted to the default view.
+decision_tree:
+  root:
+    id: H1
+    node_id: H1
+    role: target_evidence
+    zh: "核心假设 H1：CE-only 是否优于匹配 NN（合成 ER）"
+    en: "Core hypothesis H1: is CE-only better than a matched NN (synthetic ER)?"
+  branches:
+    - id: pairing
+      role: target_evidence
+      node_id: H1
+      target: 20
+      zh: "预注册配对：20 个独立 graph×noise 单位"
+      en: "Pre-registered pairs: 20 independent graph×noise units"
+    - id: gates
+      role: required_gate
+      gate: G0_H1
+      zh: "公平比较合同 G0"
+      en: "Fair-comparison contract G0"
+      children:
+        - {node_id: G0.3_exact_split_hash, zh: "相同 split", en: "Same split"}
+        - {node_id: G0.5_fold_W_cache_hash, zh: "相同 fold-W cache", en: "Same fold-W cache"}
+        - {node_id: G0.6_frozen_selection_receipt, zh: "冻结选择收据", en: "Frozen selection receipt"}
+    - id: historic
+      role: historic_signal
+      parent_node: A3.partial_correlation
+      zh: "历史机制线索 A3"
+      en: "Historical mechanism clues A3"
+      children:
+        - {node_id: A3.pcorr.linear_ER, zh: "线性 ER · 偏相关", en: "Linear ER · partial corr"}
+        - {node_id: A3.pcorr.nonlinear_ER, zh: "非线性 ER · 偏相关", en: "Nonlinear ER · partial corr"}
+        - {node_id: A3.pcorr.SF, zh: "SF · 偏相关", en: "SF · partial corr"}
+    - id: baseline
+      role: required_gate
+      node_id: B0
+      zh: "基线校准 B0"
+      en: "Baseline calibration B0"
+      require_children: [B0.mark_100, B0.mark_cc_total100]
+      gap_zh: "Mark-CC-100 未满足"
+      gap_en: "Mark-CC-100 unmet"
+    - id: holdout
+      role: holdout
+      node_id: F0
+      zh: "最终独立验证 F0"
+      en: "Final independent validation F0"
+  candidate_library:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+
 # Legacy diagnostic records.  These are kept for provenance but MUST NOT be
 # used for strict H1 inference.
 diagnostic_records:

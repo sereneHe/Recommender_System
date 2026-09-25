@@ -38,6 +38,7 @@ class TestManifestSync(unittest.TestCase):
         base = Path(self._tmp.name)
         self.remote = base / "remote.git"
         self.work = base / "work"
+        self.receipts = base / "receipts"
         subprocess.run(["git", "init", "--bare", "-q", str(self.remote)], check=True)
         self.work.mkdir()
         _git(self.work, "init", "-q")
@@ -73,7 +74,7 @@ class TestManifestSync(unittest.TestCase):
         code, info = git_sync.sync(self.work, self.manifest, "github",
                                    "current-experiments", "manifest test", None)
         self.assertEqual(code, 0)
-        self.assertEqual(info["status"], "pushed")
+        self.assertEqual(info["status"], "verified")
         status = _git(self.work, "status", "--porcelain").stdout
         self.assertIn("data/", status)          # data NOT committed
         self.assertNotIn("code.py", status)     # code committed
@@ -83,7 +84,7 @@ class TestManifestSync(unittest.TestCase):
 
     def test_invalid_target_is_rejected(self):
         code, info = git_sync.sync(self.work, self.manifest, "github",
-                                   "current-experiments", None, None, target="nonsense")
+                                   "current-experiments", None, self.receipts, target="nonsense")
         self.assertEqual(code, 2)
         self.assertEqual(info["status"], "invalid_target")
 
@@ -92,28 +93,85 @@ class TestManifestSync(unittest.TestCase):
         _git(self.work, "add", "--", "outside.txt")   # staged, but not in manifest
         (self.work / "code.py").write_text("a")
         code, info = git_sync.sync(self.work, self.manifest, "github",
-                                   "current-experiments", None, None)
+                                   "current-experiments", None, self.receipts)
         self.assertEqual(code, 1)
         self.assertEqual(info["status"], "refused_staged_outside_manifest")
         self.assertIn("outside.txt", info["staged_outside_manifest"])
-        # nothing was pushed
-        status = _git(self.work, "status", "--porcelain").stdout
-        self.assertIn("code.py", status)
+        # the refusal is still recorded as an immutable receipt
+        self.assertTrue(list(self.receipts.glob("*.json")))
 
-    def test_receipt_has_unified_schema(self):
-        import tempfile as _tf
-        with _tf.TemporaryDirectory() as d:
-            (self.work / "code.py").write_text("a")
-            code, _ = git_sync.sync(self.work, self.manifest, "github",
-                                    "current-experiments", "m", Path(d), target="method")
-            self.assertEqual(code, 0)
-            receipt = json.loads((Path(d) / "latest-method.json").read_text())
-            for key in ("target", "repository", "branch", "manifest_hash",
-                        "pre_sync_commit", "post_sync_commit",
-                        "remote_commit_before", "remote_commit_after",
-                        "uploaded", "excluded", "synced_at_utc"):
-                self.assertIn(key, receipt)
-            self.assertEqual(receipt["target"], "method")
+    def test_receipt_has_unified_schema_and_no_absolute_paths(self):
+        (self.work / "code.py").write_text("a")
+        code, _ = git_sync.sync(self.work, self.manifest, "github",
+                                "current-experiments", "m", self.receipts, target="method")
+        self.assertEqual(code, 0)
+        receipt = json.loads((self.receipts / "latest_method.json").read_text())
+        for key in ("schema_version", "attempt_id", "target", "repository", "remote",
+                    "branch", "manifest", "manifest_hash", "pre_sync_commit",
+                    "created_commit", "post_sync_commit", "remote_commit_before",
+                    "remote_commit_after", "uploaded_files", "excluded_files",
+                    "status", "started_at_utc", "finished_at_utc", "error"):
+            self.assertIn(key, receipt)
+        self.assertEqual(receipt["target"], "method")
+        self.assertEqual(receipt["status"], "verified")
+        self.assertEqual(receipt["repository"], self.work.name)
+        self.assertEqual(receipt["manifest"], "m.txt")       # relative to repo root
+        self.assertNotIn(str(self._tmp.name), json.dumps(receipt))  # no absolute paths
+
+    def test_receipts_are_immutable_and_latest_is_a_pointer(self):
+        def immutable(receipts):
+            return sorted(p for p in receipts.glob("*_method_*.json")
+                          if not p.name.startswith("latest_"))
+
+        (self.work / "code.py").write_text("a")
+        git_sync.sync(self.work, self.manifest, "github", "current-experiments",
+                      "one", self.receipts)
+        first_files = immutable(self.receipts)
+        self.assertEqual(len(first_files), 1)
+        first = first_files[0].read_text()
+        (self.work / "code.py").write_text("b")
+        git_sync.sync(self.work, self.manifest, "github", "current-experiments",
+                      "two", self.receipts)
+        second_files = immutable(self.receipts)
+        self.assertEqual(len(second_files), 2)               # every attempt kept
+        self.assertTrue(any(p.read_text() == first for p in second_files))
+
+    def test_verify_matches_remote_and_manifest(self):
+        (self.work / "code.py").write_text("a")
+        git_sync.sync(self.work, self.manifest, "github", "current-experiments",
+                      "m", self.receipts)
+        ok = git_sync.verify(self.work, self.manifest, "github", "current-experiments",
+                             self.receipts, "method")
+        self.assertTrue(ok["verified"])
+        self.manifest.write_text("*.py\nscripts\n# changed\n")   # manifest hash drifts
+        stale = git_sync.verify(self.work, self.manifest, "github", "current-experiments",
+                                self.receipts, "method")
+        self.assertFalse(stale["verified"])
+        self.assertEqual(stale["status"], "push_succeeded_but_unverified")
+
+    def test_target_lock_is_exclusive(self):
+        with git_sync._target_lock(self.receipts, "method") as first:
+            self.assertTrue(first)
+            with git_sync._target_lock(self.receipts, "method") as second:
+                self.assertFalse(second)
+            with git_sync._target_lock(self.receipts, "dashboard") as other:
+                self.assertTrue(other)          # a different target is independent
+
+    def test_audit_publish_creates_dedicated_branch(self):
+        (self.work / "code.py").write_text("a")
+        code, info = git_sync.sync(self.work, self.manifest, "github",
+                                   "current-experiments", "m", self.receipts,
+                                   target="method", audit_branch="audit/git-sync")
+        self.assertEqual(code, 0)
+        self.assertTrue(info.get("audit_publish", {}).get("published"), info.get("audit_publish"))
+        branches = subprocess.run(["git", "--git-dir", str(self.remote), "branch", "--list"],
+                                  capture_output=True, text=True).stdout
+        self.assertIn("audit/git-sync", branches)   # code branch untouched by receipts
+        files = subprocess.run(["git", "--git-dir", str(self.remote),
+                                "ls-tree", "--name-only", "-r", "audit/git-sync"],
+                               capture_output=True, text=True).stdout
+        self.assertIn("receipts/", files)
+        self.assertNotIn("code.py", files)
 
 
 if __name__ == "__main__":
