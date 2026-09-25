@@ -1262,11 +1262,20 @@ def log_active_w_edges(cfg, W):
             if abs(weight) > threshold:
                 edges.append((names[src], names[dst], weight))
 
+    oracle = str(getattr(cfg, "constraint_audit_oracle", "none")).strip().lower()
+    if oracle in {"", "none", "off"}:
+        # No oracle audit is configured (e.g. the unconstrained NN reference),
+        # so the audit label would be meaningless -- and printing
+        # "constraint_source=estimated_dag" there reads like the supplied true
+        # W was estimated.  Say so explicitly instead.
+        source_note = "constraint_source=n/a (no oracle audit configured)"
+    else:
+        source_note = f"constraint_source={w_constraint_source(cfg)}"
     logging.info(
-        "Active W edges above %.3g: %d (constraint_source=%s; W: %s)",
+        "Active W edges above %.3g: %d (%s; W: %s)",
         threshold,
         len(edges),
-        w_constraint_source(cfg),
+        source_note,
         w_provenance(cfg),
     )
     for src_name, dst_name, weight in edges:

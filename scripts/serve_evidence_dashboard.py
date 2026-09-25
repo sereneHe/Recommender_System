@@ -20,6 +20,7 @@ import csv
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +33,29 @@ STATE_LOCK = threading.Lock()
 LAST = {"at": 0.0, "ok": None, "log": "", "running": False}
 # Do not re-run the heavy sync+rebuild more often than this (seconds).
 MIN_REFRESH_INTERVAL = float(os.environ.get("EVIDENCE_REFRESH_MIN_INTERVAL", "20"))
+# Manifest-scoped git sync (same implementation the workbench uses).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import git_sync  # noqa: E402
+DASHBOARD_ROOT = Path(os.environ.get("DASHBOARD_PROJECT_ROOT", "/Users/xiaoyuhe/自动发文章dashboard"))
+METHOD_MANIFEST = ROOT / "closed_loop_method_manifest.txt"
+DASHBOARD_MANIFEST = ROOT / "dashboard_manifest.txt"
+
+
+def git_target(name: str) -> dict:
+    """Return the manifest/remote/branch triple for a sync target."""
+    if str(name).strip().lower() == "dashboard":
+        return dict(root=DASHBOARD_ROOT, manifest=DASHBOARD_MANIFEST,
+                    remote=os.environ.get("DASHBOARD_GIT_REMOTE", "dashboard-app"),
+                    branch=os.environ.get("DASHBOARD_GIT_BRANCH", "main"))
+    return dict(root=ROOT, manifest=METHOD_MANIFEST,
+                remote=os.environ.get("GIT_SYNC_REMOTE", "github"),
+                branch=os.environ.get("GIT_SYNC_BRANCH", "current-experiments"))
+
+
+def _query_target(path: str) -> str:
+    if "target=dashboard" in path:
+        return "dashboard"
+    return "method"
 
 
 def read_csv(path: Path):
@@ -244,6 +268,7 @@ I18N_BRIDGE = r'''<script id="dashboard-i18n-bridge">
     "（替代 Dashboard 第五步）": "(replaces Dashboard step 5)",
     "；配对 unit = graph_seed×noise_seed / target×seed；判据 CI_lo>0 且 ≥5%。": "; pairing unit = graph_seed×noise_seed / target×seed; criterion CI_lo>0 and >=5%.",
     "无失败门": "no failed gate",
+    "· 无失败门": "· no failed gate",
     "open · 硬门未满足": "open · hard gate not met",
     "低于实用阈值": "Below practical threshold",
     "低功效不确定": "Low-power inconclusive",
@@ -427,13 +452,19 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        if self.path in ("/", "/index.html") or self.path.startswith("/?"):
             if HTML.exists():
-                self._send(200, HTML.read_bytes())
+                self._send(200, render_html())
             else:
                 self._send(404, b"dashboard.html not built", "text/plain")
         elif self.path.startswith("/api/state"):
             self._send(200, json.dumps(state(), ensure_ascii=False).encode(), "application/json")
+        elif self.path.startswith("/api/git/preview"):
+            try:
+                info = git_sync.preview(**git_target(_query_target(self.path)))
+                self._send(200, json.dumps(info, ensure_ascii=False).encode(), "application/json")
+            except Exception as exc:  # pragma: no cover - defensive
+                self._send(500, json.dumps({"error": str(exc)}).encode(), "application/json")
         else:
             self._send(404, b"not found", "text/plain")
 
@@ -441,8 +472,25 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/refresh"):
             force = "force=0" not in self.path
             self._send(200, json.dumps(start_refresh(force=force), ensure_ascii=False).encode(), "application/json")
-        else:
-            self._send(404, b"not found", "text/plain")
+            return
+        if self.path.startswith("/api/git/sync"):
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                payload = json.loads(raw or b"{}")
+            except ValueError:
+                payload = {}
+            target = str(payload.get("target") or _query_target(self.path))
+            message = payload.get("message") or None
+            try:
+                code, info = git_sync.sync(**git_target(target), message=message,
+                                           receipt_path=REPORTS / "git_sync_receipt.json")
+                self._send(200 if code == 0 else 502,
+                           json.dumps(info, ensure_ascii=False).encode(), "application/json")
+            except Exception as exc:  # pragma: no cover - defensive
+                self._send(500, json.dumps({"error": str(exc)}).encode(), "application/json")
+            return
+        self._send(404, b"not found", "text/plain")
 
 
 def main():

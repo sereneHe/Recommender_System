@@ -446,9 +446,30 @@ def simulate_synthetic_problem(
     return samples_df, weights, oracle_fn, metadata
 
 
+def temporal_parent_blocks(weights, samples, target: int):
+    """Return the ``(P_t, P_{t-1})`` blocks of the target's true parents.
+
+    ``weights`` is the true structural matrix and ``samples`` the generated
+    series (rows = time, columns = nodes).  Row 0 has no predecessor, so its
+    lag block is zero-filled exactly as in the generator.  Both blocks are
+    column-aligned with ``np.flatnonzero(weights[:, target])``.
+    """
+    weights = np.asarray(weights, dtype=float)
+    samples = np.asarray(samples, dtype=float)
+    parents = np.flatnonzero(weights[:, target])
+    if len(parents) == 0:
+        return (np.zeros((samples.shape[0], 0), dtype=float),
+                np.zeros((samples.shape[0], 0), dtype=float))
+    current = samples[:, parents]
+    lagged = np.zeros_like(current)
+    lagged[1:] = samples[:-1, parents]
+    return current, lagged
+
+
 def structural_conditional_mean(weights, features, mechanism: str, target: int,
                                 temporal_parents=None, temporal_rho: float = 0.5,
-                                smooth_links: tuple = _SMOOTH_LINKS) -> np.ndarray:
+                                smooth_links: tuple = _SMOOTH_LINKS,
+                                require_lag: bool = False) -> np.ndarray:
     """Public, deterministic E[target | parents] for the given mechanism.
 
     Unlike :func:`simulate_synthetic_problem`'s closure this takes the weights
@@ -456,9 +477,22 @@ def structural_conditional_mean(weights, features, mechanism: str, target: int,
     the estimator) can compute the real conditional mean without re-running the
     generator or knowing the seed.  Interaction pairs and per-node links are
     derived deterministically from ``weights`` exactly as in generation.
+
+    ``require_lag`` guards the dynamic mechanism: with
+    ``mechanism="temporal_smooth"`` a missing ``temporal_parents`` block means
+    the caller only holds ``P_t``, so the dynamic conditional mean is not
+    identifiable.  Refusing is the point -- silently returning ``tanh(z)``
+    would report a static oracle for a dynamic DGP.
     """
     weights = np.asarray(weights, dtype=float)
     data = np.asarray(features, dtype=float)
+    if (require_lag and str(mechanism) == "temporal_smooth"
+            and temporal_parents is None):
+        raise ValueError(
+            "refusing to evaluate a temporal_smooth oracle without the lag "
+            "block P_{t-1}: a static feature matrix does not identify the "
+            "dynamic conditional mean."
+        )
     n_nodes = weights.shape[0]
     interactions: dict[int, list] = {}
     for j in range(n_nodes):
@@ -470,6 +504,32 @@ def structural_conditional_mean(weights, features, mechanism: str, target: int,
     return _structural_mean(data, weights, int(target), str(mechanism),
                             tuple(smooth_links), np.random.default_rng(0),
                             interactions, temporal_parents, float(temporal_rho))
+
+
+def add_lag_features(samples_df, lag: int, columns=None, suffix: str = "_lag"):
+    """Append ``k`` lagged copies of the predictor columns to a synthetic frame.
+
+    ``add_lag_features(df, 1)`` turns ``X_t`` into the ``[X_t, X_{t-1}]`` input
+    tier.  The first ``lag`` rows have no predecessor; they are zero-filled and
+    the caller is expected to drop them (the generator's own lag block does the
+    same).  ``columns`` defaults to every column except the last, matching the
+    synthetic ``[features..., target]`` layout.
+    """
+    lag = int(lag)
+    if lag < 0:
+        raise ValueError("lag must be non-negative.")
+    frame = samples_df.copy()
+    if lag == 0:
+        return frame
+    if columns is None:
+        columns = list(frame.columns[:-1])
+    lagged = {}
+    for column in columns:
+        for k in range(1, lag + 1):
+            lagged[f"{column}{suffix}{k}"] = frame[column].shift(k)
+    for name, series in lagged.items():
+        frame[name] = series
+    return frame
 
 
 def save_synthetic_artifacts(output_dir, samples_df, w_true, oracle_fn, metadata) -> dict:

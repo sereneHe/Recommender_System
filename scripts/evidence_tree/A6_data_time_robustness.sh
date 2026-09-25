@@ -59,7 +59,8 @@ FRED_COMMON=(
   "solver.cv_time_gap=${CV_TIME_GAP:-0}"
   "solver.validation_split_strategy=time"
   "solver.prediction_loss=mse"
-  "++problem.evidence_batch_id=${EVIDENCE_BATCH_ID}"
+  # evidence_batch_id is injected by run_arm for every arm; do not duplicate it
+  # here, or arms passing this array would apply the override twice.
 )
 
 # Shared reference: default data representation, MSE loss.

@@ -25,7 +25,7 @@
 #     before H1 is submitted.
 
 schema_version: 1
-registry_version: "2026-09-24.1"
+registry_version: "2026-09-25.1"
 
 hypotheses:
   H1:
@@ -120,3 +120,12 @@ diagnostic_records:
   - id: "A8.*@smoke/pilot (graph 42-44 x noise 101-102)"
     strict_inference_allowed: false
     note: "A8 smoke/pilot units were inspected during development (e.g. the 23998597 temporal smoke). The A8 confirmation table is graph 52-61 x noise 101-102; the inspected units must never back an A8 confirm claim."
+  - id: "A8.5 temporal smoke@23998597 (et_a8_temporal_smoke_v1)"
+    strict_inference_allowed: false
+    note: "Static X_t input with a shuffled-KFold fallback (cv_kind=kfold), so it measures shuffled static regression risk, not future-prediction risk. It says nothing about NN vs XGB on a dynamic SEM. Superseded by the pre-registered preflight in docs/a8_lag_preflight.md."
+  - id: "23919696.pbs-m1.metacentrum.cz-确认mark-cc比mark好是因为树数10变为100"
+    strict_inference_allowed: false
+    note: "Legacy Mark-CC cohort: mark_cc_10/mark_cc_100 confounded the tree count with n_outer (1 vs 10) and both arms actually had n_estimators=10. Cannot back any tree-count or Mark-CC claim."
+  - id: "23972038.pbs-m1.metacentrum.cz"
+    strict_inference_allowed: false
+    note: "B0 batch et_b0_er_v3 ran the pre-fix B0 script (mark_cc_100 also had n_estimators=10) and predates the run_arm evidence_batch_id fix, so its cross-arm B0 pairs are not usable. Use B0.cc_tree_count.er from a post-2026-09-25 10:58 run."
