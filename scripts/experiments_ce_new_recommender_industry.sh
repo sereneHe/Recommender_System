@@ -36,6 +36,8 @@ HIDDEN_DIM="${HIDDEN_DIM:-32}"
 DEPTH="${DEPTH:-2}"
 N_OUTER="${N_OUTER:-10}"
 N_INNER="${N_INNER:-100}"
+INCLUDE_CLASSICAL_BASELINES="${INCLUDE_CLASSICAL_BASELINES:-1}"
+HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
 
 export HC_WEIBULL_GAUSSIANIZE=0
 
@@ -96,6 +98,61 @@ CE_LITE_COMMON=(
   "solver.constraint_audit_enabled=true"
 )
 
+run_classical_hc_baseline() {
+  local label="$1"
+  local backend="$2"
+  shift 2
+
+  local seed
+  for seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${seed}" =~ ^[0-9]+$ ]] || die "Invalid seed ${seed}."
+    export HC_SPBM_RANDOM_SEED="${seed}"
+    export HC_CONSTRAINT_BACKEND="${backend}"
+    if [[ -n "${HC_CE_BD_SEED_BASE:-}" ]]; then
+      export HC_CE_BD_SEED="$((HC_CE_BD_SEED_BASE + seed))"
+    fi
+    local -a seed_overrides=(
+      "solver.random_state=${seed}"
+      "solver.cv_random_state=$((seed + 10000))"
+      "solver.validation_random_state=$((seed + 20000))"
+    )
+    if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
+      run_hydra "${CELITE_EXPERIMENT_PREFIX}_${label}_seed${seed}" "hc_predictor" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@" "${PLAN_EXTRA_OVERRIDES[@]}"
+    else
+      run_hydra "${CELITE_EXPERIMENT_PREFIX}_${label}_seed${seed}" "hc_predictor" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@"
+    fi
+  done
+}
+
+run_classical_tree_baseline() {
+  local label="$1"
+  local solver="$2"
+  shift 2
+
+  local seed
+  for seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${seed}" =~ ^[0-9]+$ ]] || die "Invalid seed ${seed}."
+    local -a seed_overrides=(
+      "solver.random_state=${seed}"
+      "solver.n_runs=${N_RUNS}"
+      "solver.recalculate_dag=true"
+      "solver.feature_selector=none"
+      "+solver.cv_strategy=time_series"
+      "+solver.cv_time_test_size=${TIME_TEST_SIZE}"
+      "+solver.cv_time_gap=0"
+    )
+    if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
+      run_hydra "${CELITE_EXPERIMENT_PREFIX}_${label}_seed${seed}" "${solver}" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@" "${PLAN_EXTRA_OVERRIDES[@]}"
+    else
+      run_hydra "${CELITE_EXPERIMENT_PREFIX}_${label}_seed${seed}" "${solver}" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@"
+    fi
+  done
+}
+
 case "${STAGE}" in
   preaudit)
     # Stage P: constraint audit. Runs the CE arm with the audit enabled and a
@@ -148,6 +205,26 @@ case "${STAGE}" in
       "${COMMON[@]}" \
       "${CE_LITE_COMMON[@]}" \
       "solver.use_ci_penalty=false"
+
+    # Classical references use the same target list, rolling folds, training
+    # budget, and model/CV seeds.  They are deliberately excluded from the
+    # pre-audit because that stage does not test predictive efficacy.
+    if [[ "${INCLUDE_CLASSICAL_BASELINES}" == "1" ]]; then
+      run_classical_hc_baseline "b0_hc_predictor_${HC_BASELINE_BACKEND}" "${HC_BASELINE_BACKEND}" \
+        "${COMMON[@]}" \
+        "solver.constrained=true" \
+        "solver.use_w_constraints=true" \
+        "solver.use_ci_penalty=false" \
+        "solver.w_matrix_space=model_standardized" \
+        "solver.validation_split_strategy=time" \
+        "solver.dag_fit_scope=inner_train" \
+        "solver.ce_use_balanced_batches=false" \
+        "solver.ce_batch_size=128" \
+        "solver.constraint_audit_enabled=true"
+      run_classical_tree_baseline "b1_mark" "mark"
+      run_classical_tree_baseline "b2_mark_with_cc" "mark_with_cc" \
+        "solver.n_outer=${N_OUTER}" "solver.time_limit=${TIME_LIMIT}"
+    fi
 
     if [[ "${DRY_RUN}" != "1" ]]; then
       AUDIT_ROOT="${AUDIT_ROOT:-multirun}"

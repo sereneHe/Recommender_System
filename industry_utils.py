@@ -9,6 +9,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import pandas as pd
+import numpy as np
 import yaml
 
 
@@ -628,6 +629,9 @@ def load_data(
     end_date=None,
     impute="none",
     dropna_selected=True,
+    feature_lag=0,
+    add_time_trend=False,
+    regime_break_date=None,
 ):
     df = pd.read_csv(data_path)
     if "date" in df.columns:
@@ -650,6 +654,29 @@ def load_data(
 
     keep_cols = ["date"] + [c for c in selected if c in df.columns]
     df = df[keep_cols].sort_values("date").reset_index(drop=True)
+
+    feature_lag = int(feature_lag or 0)
+    if feature_lag < 0:
+        raise ValueError("feature_lag must be non-negative.")
+    configured_features = list(features) if features is not None else []
+    feature_cols = [c for c in configured_features if c in df.columns and c != target]
+    if feature_lag:
+        if not feature_cols:
+            raise ValueError("feature_lag requires at least one configured predictor feature.")
+        # Forecasting at t may only use predictors observed at t-lag.  The
+        # original feature names are retained so the DAG is learned in the
+        # lagged-predictor/current-target space for this experiment.
+        df[feature_cols] = df[feature_cols].shift(feature_lag)
+
+    if bool(add_time_trend):
+        denominator = max(len(df) - 1, 1)
+        df["time_trend"] = np.arange(len(df), dtype=float) / float(denominator)
+        selected.append("time_trend")
+
+    if regime_break_date not in (None, "", "null", "None"):
+        break_date = pd.to_datetime(regime_break_date)
+        df["regime_post_break"] = (df["date"] >= break_date).astype(float)
+        selected.append("regime_post_break")
 
     if impute == "interpolate_ffill_bfill":
         value_cols = [c for c in df.columns if c != "date"]

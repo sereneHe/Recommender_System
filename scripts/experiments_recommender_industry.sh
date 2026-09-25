@@ -1,8 +1,13 @@
 #!/bin/sh
 
-export PYTHONPATH="${PYTHONPATH}:../"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REPO_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
+cd "${REPO_ROOT}"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+. "${SCRIPT_DIR}/python_runtime.sh"
+project_python_require "${REPO_ROOT}"
 
-CMD=".venv/bin/python run_experiments.py --multirun --config-name=config"
+CMD="${PYTHON_BIN} run_experiments.py --multirun --config-name=config"
 
 PROBLEM_GROUP="FRED_16country_monthly"
 problem="${PROBLEM_GROUP}/industry_eu_ltu,${PROBLEM_GROUP}/industry_eu_lux,${PROBLEM_GROUP}/industry_eu_nld,${PROBLEM_GROUP}/industry_eu_prt,${PROBLEM_GROUP}/industry_eu_svk,${PROBLEM_GROUP}/industry_eu_svn"

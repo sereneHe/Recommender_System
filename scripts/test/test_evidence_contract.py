@@ -11,6 +11,7 @@ the evidence builder) so they run anywhere the builder runs.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -159,6 +160,46 @@ class TestRegistry(unittest.TestCase):
                 {"graph_seeds": graph, "noise_seeds": noise}))
             self.assertEqual(confirm & inspected, set(),
                              f"A8 confirm overlaps inspected stage {stage}")
+
+    def test_run_arm_always_writes_the_evidence_batch_id(self):
+        """Arms that skip EV_COMMON (the A8 XGB baseline) still need a cohort.
+
+        Without the batch id the builder falls back to the PBS job id for that
+        arm, which never matches the other arm's batch cohort, so the
+        comparison produced zero pairs.
+        """
+        common = ROOT / "scripts" / "evidence_tree" / "_common.sh"
+        harness = (
+            f'source "{common}" >/dev/null 2>&1; '
+            'run_hydra() { printf "%s\\n" "$@" | grep -E "evidence_batch_id"; }; '
+            'EV_SOLVER=mark; run_arm "A8" "xgb100"'
+        )
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "EV_AXIS": "A8", "EV_SCOPE": "synthetic/Temporal",
+            "PROBLEMS": "synthetic_temporal", "N_NODES": "20",
+            "EXPECTED_EDGES": "30", "N_SAMPLES": "10000",
+            "EVIDENCE_BATCH_ID": "et_test_batch",
+            "GRAPH_SEEDS": "42", "NOISE_SEEDS": "101", "N_RUNS": "5",
+        }
+        proc = subprocess.run(["bash", "-c", harness], capture_output=True,
+                              text=True, env=env, cwd=str(ROOT))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("++problem.evidence_batch_id=et_test_batch", proc.stdout)
+
+    def test_a8_script_seed_defaults_come_from_the_stage_policy(self):
+        """A direct A8 invocation must not fall back to a stale seed table."""
+        script = ROOT / "scripts" / "evidence_tree" / "A8_nn_favorable_synthetic.sh"
+        env = {**os.environ, "DRY_RUN": "1", "MECHANISM": "temporal_smooth",
+               "EVIDENCE_BATCH_ID": "et_a8_test"}
+        for key in ("GRAPH_SEEDS", "NOISE_SEEDS", "A8_STAGE"):
+            env.pop(key, None)
+        proc = subprocess.run(["bash", str(script)], capture_output=True,
+                              text=True, cwd=str(ROOT), env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        graph, noise = self._stage_seeds("smoke")
+        self.assertIn("graph_seeds=" + " ".join(str(g) for g in graph), proc.stdout)
+        self.assertIn("noise_seeds=" + " ".join(str(n) for n in noise), proc.stdout)
 
     def test_duplicate_cohort_reservation_fails(self):
         with tempfile.TemporaryDirectory() as d:

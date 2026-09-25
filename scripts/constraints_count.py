@@ -78,6 +78,30 @@ def count_constraints_in_log(log_path: Path) -> tuple[int, int, str]:
     return 0, 0, "no_constraint_log"
 
 
+def count_constraints_in_artifact(run_dir: Path) -> tuple[int, int, str] | None:
+    """Use the per-run table when available; keep log parsing as fallback."""
+    path = run_dir / "constraint_counts.csv"
+    if not path.is_file():
+        return None
+    try:
+        table = pd.read_csv(path)
+    except (OSError, pd.errors.ParserError, UnicodeError):
+        return None
+    if table.empty:
+        return None
+    if "stage" in table.columns:
+        initial = table[table["stage"].astype(str) == "initial_fit"]
+        row = initial.iloc[0] if not initial.empty else table.iloc[0]
+    else:
+        row = table.iloc[0]
+    try:
+        independent = int(float(row.get("independent_constraints", 0)))
+        dependent = int(float(row.get("dependent_constraints", 0)))
+    except (TypeError, ValueError):
+        return None
+    return independent, dependent, "constraint_counts.csv"
+
+
 def build_constraint_tables(
     report_dir: Path = DEFAULT_REPORT_DIR,
     project_root: Path = PROJECT_ROOT,
@@ -96,9 +120,10 @@ def build_constraint_tables(
         for row in report.itertuples(index=False):
             run_id = str(getattr(row, "run_id"))
             run_dir = resolve_run_dir(run_id, project_root)
-            independent, dependent, source = count_constraints_in_log(
-                run_dir / "run_experiments.log"
-            )
+            counts = count_constraints_in_artifact(run_dir)
+            if counts is None:
+                counts = count_constraints_in_log(run_dir / "run_experiments.log")
+            independent, dependent, source = counts
             detail_rows.append(
                 {
                     "method": method,

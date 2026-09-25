@@ -53,8 +53,10 @@ ce_statistic_eps: 1.0e-8
 ce_tolerance_mode: standard_error
 ce_tolerance_sd_multiplier: 1.96
 # auto uses empirical contiguous-window spread when >= 5 windows of 100 rows
-# are available; otherwise it falls back to Newey-West HAC. This is an
-# uncertainty scale, not a classical iid confidence interval.
+# are available; otherwise it falls back to Newey-West HAC. Both continuous
+# CE statistics (partial correlation and residual covariance) use the same
+# configured uncertainty policy; this is an uncertainty scale, not a
+# classical iid confidence interval.
 ce_se_method: auto
 ce_window_n_windows: 5
 ce_window_min_size: 100

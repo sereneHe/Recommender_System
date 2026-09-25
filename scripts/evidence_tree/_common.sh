@@ -108,7 +108,6 @@ EV_COMMON=(
   "++problem.n_samples=${N_SAMPLES}"
   "++problem.n_nodes=${N_NODES}"
   "++problem.expected_edges=${EXPECTED_EDGES}"
-  "++problem.evidence_batch_id=${EVIDENCE_BATCH_ID}"
   "++problem.sem_type=gauss"
 )
 
@@ -149,6 +148,13 @@ run_arm() {
         "++problem.evidence_node=${node}"
         "++problem.evidence_arm=${label}"
         "++problem.evidence_scope=${EV_SCOPE}"
+        # Every arm MUST carry the batch id.  It previously lived only in
+        # EV_COMMON, so arms that pass their own override set (e.g. the A8
+        # XGB baseline using XGB_SEED) had an empty evidence_batch_id.  The
+        # builder then fell back to the PBS job id for that arm, which can
+        # never match the batch cohort of the other arm -> "no common cohort"
+        # -> the comparison silently produced zero pairs.
+        "++problem.evidence_batch_id=${EVIDENCE_BATCH_ID}"
       )
       local -a seed_overrides=(
         "solver.random_state=${model_seed}"

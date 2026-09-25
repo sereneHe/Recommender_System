@@ -3,6 +3,7 @@ from sklearn.metrics import mean_squared_error
 
 np.seterr(invalid="raise")
 import xgboost as xgb
+from utils import coerce_random_state
 
 
 def compute_predictor_errors_scikit(preds, y, _y_train_mean_):
@@ -53,7 +54,7 @@ def fit_aug_lagrangian_W_constraint(
             eta=cfg.learning_rate,
             #objective="reg:squarederror",
             #tree_method="hist",
-            seed=cfg.random_state,
+            seed=coerce_random_state(getattr(cfg, "random_state", None), 42),
         )
     params = dict(params)  # copy
     params["base_score"] = base_score

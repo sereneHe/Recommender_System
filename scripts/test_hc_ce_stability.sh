@@ -23,7 +23,8 @@ REPO_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
 cd "${REPO_ROOT}"
 
 export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+source "${SCRIPT_DIR}/python_runtime.sh"
+project_python_require "${REPO_ROOT}"
 CMD="${PYTHON_BIN} run_experiments.py --multirun --config-name=config"
 
 # LTU is the target used in the prior HC-CE stability run.  Override PROBLEM

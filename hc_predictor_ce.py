@@ -487,14 +487,20 @@ except ModuleNotFoundError:  # pragma: no cover - keeps local smoke tests import
     humancompatible_pbm_module = None
 
     class PBM:
-        def __init__(self, m, **kwargs):
-            del kwargs
-            self.duals = torch.zeros(m)
-            self.penalties = torch.ones(m)
+        """Import-time stub that FAILS LOUDLY when used.
 
-        def forward_update(self, loss, constraints):
-            del constraints
-            return loss
+        A missing ``humancompatible-train`` must never silently turn a
+        deterministic-PBM run into an unconstrained MSE objective.  Constructing
+        this stub is therefore a hard error.
+        """
+
+        def __init__(self, *args, **kwargs):
+            raise ModuleNotFoundError(
+                "humancompatible-train is required for ce_pbm_backend="
+                "humancompatible_pbm. Install it (pip install humancompatible-train) "
+                "or choose ce_pbm_backend=stochastic_pbm. Refusing to silently run an "
+                "unconstrained MSE objective."
+            )
 
 
 def _quad_log_barrier(t):
@@ -535,39 +541,38 @@ _PENALTY_BARRIER_FUNCS = {
 }
 
 
-_HUMANCOMPATIBLE_PBM_PENALTY_UPDATES = {
-    "const": "_update_penalties_const",
-    "dimin": "_update_penalties_dimin",
-    "diminish": "_update_penalties_dimin",
-    "dimin_dual": "_update_penalties_dimin_dual",
-}
+_PBM_PENALTY_UPDATE_ALIASES = {"diminish": "dimin"}
+
+
+def _normalize_penalty_update(value) -> str:
+    text = str(value or "const").strip().lower()
+    return _PBM_PENALTY_UPDATE_ALIASES.get(text, text)
 
 
 def ensure_humancompatible_pbm_compatible(pbm):
+    """Validate PBM settings against the INSTALLED humancompatible-train API.
+
+    humancompatible-train resolves the penalty-update and barrier names from
+    module-level lookup tables inside ``PBM.__init__`` (0.4.x); older builds
+    needed the group settings patched afterwards.  We only normalise/validate
+    here so an unsupported mode fails loudly on any version.
+    """
     if humancompatible_pbm_module is None or getattr(pbm, "is_local_stochastic_pbm", False):
         return pbm
-    if not hasattr(pbm, "param_groups"):
-        return pbm
-
     meta = getattr(pbm, "_codiet_pbm_meta", {})
-    penalty_update = str(meta.get("penalty_update", "const")).lower()
-    update_fn_name = _HUMANCOMPATIBLE_PBM_PENALTY_UPDATES.get(penalty_update)
-    if update_fn_name is None:
+    supported = set(getattr(humancompatible_pbm_module, "penalty_updates", {}) or {})
+    penalty_update = _normalize_penalty_update(meta.get("penalty_update", "const"))
+    if supported and penalty_update not in supported:
         raise ValueError(
             f"humancompatible_pbm does not support penalty_update={penalty_update!r}. "
-            "Use one of {'const', 'dimin', 'dimin_dual'} or switch to ce_pbm_backend=stochastic_pbm."
+            f"Supported: {sorted(supported)}; or switch to ce_pbm_backend=stochastic_pbm."
         )
-    update_fn = getattr(humancompatible_pbm_module, update_fn_name)
-
-    for group in pbm.param_groups:
-        group.setdefault("penalty_update", update_fn)
-        group.setdefault("pbf", meta.get("pbf", "quadratic_logarithmic"))
-        group.setdefault("mu", float(meta.get("mu", group.get("lr", 0.3))))
-        group.setdefault("lr", float(meta.get("lr", group.get("mu", 0.3))))
-        group.setdefault("momentum", float(meta.get("momentum", 0.0)))
-        group.setdefault("dampening", float(meta.get("dampening", 0.0)))
-        if "momentum_buffer" not in group:
-            group["momentum_buffer"] = torch.zeros_like(group["params"][0])
+    barriers = set(getattr(humancompatible_pbm_module, "penalty_barrier_funcs", {}) or {})
+    pbf = str(meta.get("pbf", "quadratic_logarithmic"))
+    if barriers and pbf not in barriers:
+        raise ValueError(
+            f"humancompatible_pbm does not support pbf={pbf!r}. Supported: {sorted(barriers)}."
+        )
     return pbm
 
 
@@ -829,6 +834,35 @@ def _partial_correlation_for_spec(X, y, spec, cfg=None):
     return (1.0 - shrinkage) * raw
 
 
+def _continuous_ce_statistic_for_spec(X, y, spec, cfg=None):
+    """Evaluate a continuous CE statistic for one constraint specification.
+
+    This helper is also used by the uncertainty estimator.  Keeping the
+    statistic selection in one place prevents the tolerance path from
+    silently using partial correlation when the training path is configured
+    for residual covariance.
+    """
+    statistic_kind = str(
+        getattr(cfg, "ce_statistic_kind", "partial_correlation")
+        if cfg is not None
+        else "partial_correlation"
+    ).strip().lower()
+    x_res, y_res = _ce_residuals_for_spec(X, y, spec, cfg=cfg)
+    if statistic_kind == "covariance":
+        return torch.mean(x_res * y_res)
+    if statistic_kind == "partial_correlation":
+        eps = float(getattr(cfg, "ce_statistic_eps", 1e-8)) if cfg is not None else 1e-8
+        x_std = torch.sqrt(torch.mean(x_res.square())).clamp_min(eps)
+        y_std = torch.sqrt(torch.mean(y_res.square())).clamp_min(eps)
+        raw = torch.mean((x_res / x_std) * (y_res / y_std)).clamp(-1.0, 1.0)
+        shrinkage = float(getattr(cfg, "ce_statistic_shrinkage", 0.0)) if cfg is not None else 0.0
+        return (1.0 - shrinkage) * raw
+    raise ValueError(
+        "ce_statistic_kind must be 'partial_correlation' or 'covariance', "
+        f"got {statistic_kind!r}."
+    )
+
+
 def constraint_window_statistics(X, y, spec, cfg=None):
     """Summarize a constraint statistic over contiguous training-data windows.
 
@@ -852,7 +886,11 @@ def constraint_window_statistics(X, y, spec, cfg=None):
         start = window_index * window_size
         end = n if window_index == n_windows - 1 else (window_index + 1) * window_size
         values.append(
-            float(_partial_correlation_for_spec(X[start:end], y[start:end], spec, cfg=cfg).detach().cpu())
+            float(
+                _continuous_ce_statistic_for_spec(
+                    X[start:end], y[start:end], spec, cfg=cfg
+                ).detach().cpu()
+            )
         )
     epsilon = float(getattr(cfg, "ce_window_sign_epsilon", 0.01)) if cfg is not None else 0.01
     positive = sum(value > epsilon for value in values)
@@ -913,6 +951,63 @@ def _partial_correlation_standard_error(X, y, spec, cfg=None):
         return (1.0 - shrinkage) * se
 
 
+def _covariance_standard_error(X, y, spec, cfg=None):
+    """Estimate uncertainty for the residual-covariance CE statistic.
+
+    The covariance arm uses the residual-product influence sequence.  The
+    same contiguous-window or Newey-West/HAC policy as the partial-correlation
+    arm is used, but the statistic itself remains covariance throughout.  The
+    calculation is detached because this quantity only defines a tolerance;
+    it must not add a second gradient path through the predictor.
+    """
+    with torch.no_grad():
+        x_res, y_res = _ce_residuals_for_spec(X, y, spec, cfg=cfg)
+        n = int(x_res.numel())
+        p = len(spec.get("z_indices", []) or [])
+        dof = n - p - 2
+        if n < 4 or dof <= 0:
+            return X.new_tensor(1.0)
+
+        method = _resolve_ce_se_method(cfg, n)
+        if method == "window":
+            window_summary = constraint_window_statistics(X, y, spec, cfg=cfg)
+            if window_summary["window_count"] >= 2:
+                return X.new_tensor(window_summary["window_std"])
+
+        product = x_res * y_res
+        influence = product - product.mean()
+        lag_setting = int(getattr(cfg, "ce_hac_max_lag", 0) or 0) if cfg is not None else 0
+        max_lag = lag_setting if lag_setting > 0 else int(math.ceil(n ** (1.0 / 3.0)))
+        max_lag = min(max_lag, n - 1)
+        long_run_variance = torch.mean(influence.square())
+        for lag in range(1, max_lag + 1):
+            bartlett = 1.0 - lag / float(max_lag + 1)
+            gamma = torch.mean(influence[lag:] * influence[:-lag])
+            long_run_variance = long_run_variance + 2.0 * bartlett * gamma
+        finite_sample_correction = float(n) / float(dof)
+        return torch.sqrt(
+            (long_run_variance.clamp_min(0.0) / float(n)) * finite_sample_correction
+        )
+
+
+def _ce_statistic_standard_error(X, y, spec, cfg=None):
+    """Dispatch the SE estimator without changing the configured statistic."""
+    statistic_kind = str(
+        getattr(cfg, "ce_statistic_kind", "partial_correlation")
+        if cfg is not None
+        else "partial_correlation"
+    ).strip().lower()
+    if statistic_kind == "partial_correlation":
+        return _partial_correlation_standard_error(X, y, spec, cfg=cfg)
+    if statistic_kind == "covariance":
+        return _covariance_standard_error(X, y, spec, cfg=cfg)
+    raise ValueError(
+        "SE-based tolerances support ce_statistic_kind in "
+        "{'partial_correlation', 'covariance'}, "
+        f"got {statistic_kind!r}."
+    )
+
+
 def independent_expectation_tolerances(
     X, y, ci_constraints, tolerance=0.0, cfg=None, *, se_X=None, se_y=None
 ):
@@ -926,18 +1021,12 @@ def independent_expectation_tolerances(
         raise ValueError("ce_tolerance_mode must be 'fixed' or 'standard_error'.")
     if mode == "fixed" or _is_discrete_ci_kind(penalty_kind):
         return X.new_full((len(ci_constraints),), base)
-    statistic_kind = str(getattr(cfg, "ce_statistic_kind", "partial_correlation") if cfg is not None else "partial_correlation").strip().lower()
-    if statistic_kind != "partial_correlation":
-        raise ValueError("SE-based tolerances currently require ce_statistic_kind='partial_correlation'.")
     multiplier = float(getattr(cfg, "ce_tolerance_sd_multiplier", 1.96)) if cfg is not None else 1.96
     if multiplier < 0:
         raise ValueError("ce_tolerance_sd_multiplier must be non-negative.")
     variance_X = X if se_X is None else se_X
     variance_y = y if se_y is None else se_y
-    ses = [
-        _partial_correlation_standard_error(variance_X, variance_y, spec, cfg=cfg)
-        for spec in ci_constraints
-    ]
+    ses = [_ce_statistic_standard_error(variance_X, variance_y, spec, cfg=cfg) for spec in ci_constraints]
     return base + multiplier * torch.stack(ses).to(device=X.device, dtype=X.dtype)
 
 
@@ -1338,6 +1427,33 @@ def independent_expectation_inequalities(
     return torch.abs(signed_expectations) - tolerances
 
 
+def _humancompatible_pbm_kwargs(pbm_kwargs, pbf):
+    """Map the project's PBM knobs onto the INSTALLED humancompatible-train API.
+
+    The ``PBM`` signature changed across releases: older builds accepted
+    ``mu``/``lr``, while 0.4.x accepts ``penalty_mult`` plus annealing switches
+    that require an ``epoch_length``.  Probing the installed signature lets one
+    code path run against either version instead of hard-coding one API.
+    """
+    import inspect
+
+    wanted = dict(pbm_kwargs)
+    wanted["pbf"] = pbf
+    wanted["penalty_mult"] = pbm_kwargs["mu"]
+    params = inspect.signature(PBM.__init__).parameters
+    if any(p.kind == p.VAR_KEYWORD for p in params.values()):
+        selected = dict(wanted)
+    else:
+        selected = {k: v for k, v in wanted.items() if k in params}
+    # 0.4.x anneals gamma/penalty over an epoch; without an epoch_length the
+    # annealing defaults would raise in __init__, so keep them off.
+    if "gamma_annealing" in params:
+        selected.setdefault("gamma_annealing", False)
+    if "penalty_annealing" in params:
+        selected.setdefault("penalty_annealing", False)
+    return selected
+
+
 def make_expectation_pbm(cfg, n_constraints, device):
     if n_constraints <= 0:
         return None
@@ -1353,22 +1469,23 @@ def make_expectation_pbm(cfg, n_constraints, device):
         m=n_constraints,
         mu=float(getattr(cfg, "ci_pbm_mu", 0.3)),
         lr=pbm_lr,
-        penalty_update=str(getattr(cfg, "ci_pbm_penalty_update", "const")),
+        penalty_update=_normalize_penalty_update(
+            getattr(cfg, "ci_pbm_penalty_update", "const")
+        ),
         init_duals=float(getattr(cfg, "ci_pbm_init_duals", 0.01)),
         init_penalties=float(getattr(cfg, "ci_pbm_init_penalties", 1.0)),
         penalty_range=tuple(getattr(cfg, "ci_pbm_penalty_range", (0.001, 100.0))),
         dual_range=tuple(getattr(cfg, "ci_pbm_dual_range", (0.01, 100.0))),
         device=device,
     )
+    pbf = str(getattr(cfg, "ci_pbm_pbf", "quadratic_logarithmic"))
     if pbm_backend in {"humancompatible_pbm", "pbm"}:
-        pbm = PBM(**pbm_kwargs)
+        pbm = PBM(**_humancompatible_pbm_kwargs(pbm_kwargs, pbf))
         pbm._codiet_pbm_meta = {
             "mu": pbm_kwargs["mu"],
             "lr": pbm_kwargs["lr"],
             "penalty_update": pbm_kwargs["penalty_update"],
-            "pbf": str(getattr(cfg, "ci_pbm_pbf", "quadratic_logarithmic")),
-            "momentum": float(getattr(cfg, "ci_pbm_momentum", 0.0)),
-            "dampening": float(getattr(cfg, "ci_pbm_dampening", 0.0)),
+            "pbf": pbf,
         }
         return ensure_humancompatible_pbm_compatible(pbm)
     if pbm_backend in {"stochastic_pbm", "spbm"}:

@@ -180,6 +180,25 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
     a_reg_type = cfg.a_reg_type
     target_mip_gap = cfg.target_mip_gap
 
+    # Optional structural-sparsity controls.  They are deliberately disabled
+    # by the base configuration, so the historical ExDBN objective and
+    # feasible set are unchanged unless an experiment opts in explicitly.
+    edge_penalty = float(getattr(cfg, "edge_penalty", 0.0) or 0.0)
+    if not np.isfinite(edge_penalty) or edge_penalty < 0.0:
+        raise ValueError("edge_penalty must be a finite non-negative number")
+    max_parents_cfg = getattr(cfg, "max_parents", None)
+    if max_parents_cfg in (None, "", "null", "None"):
+        max_parents = None
+    else:
+        max_parents_float = float(max_parents_cfg)
+        if (
+            not np.isfinite(max_parents_float)
+            or max_parents_float < 0.0
+            or not max_parents_float.is_integer()
+        ):
+            raise ValueError("max_parents must be a non-negative integer or null")
+        max_parents = int(max_parents_float)
+
     n, d = X.shape
     if Y is None:
         Y = []
@@ -196,6 +215,21 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
     for v1 in range(d):
         for v2 in range(v1):
             m.addConstr(W_edges_vars[v2,v1] + W_edges_vars[v1,v2] <= 1)
+
+    # Bound the number of incoming edges for each child.  This is a genuine
+    # MILP feasible-set restriction (unlike a post-solve threshold), and is
+    # only present for the explicit max_parents ablation.
+    if max_parents is not None:
+        for child in range(d):
+            m.addConstr(
+                gp.quicksum(
+                    W_edges_vars[parent, child]
+                    for parent in range(d)
+                    if parent != child
+                )
+                <= max_parents,
+                name=f"max_parents_{child}",
+            )
 
     A_edges_vars = []
     A_edges_weights = []
@@ -241,6 +275,16 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
     else:
         assert False
 
+    # Edge-cardinality regularisation is kept separate from ``reg``.  In
+    # particular, reg_type=l2 shrinks coefficients but does not discourage a
+    # dense support.  The explicit term acts on the binary edge variables and
+    # uses the same /d normalisation as the existing regularisers.
+    edge_count_term = (
+        edge_penalty * gp.quicksum(W_edges_vars.values()) / d
+        if edge_penalty > 0.0
+        else 0.0
+    )
+
     if a_reg_type == 'l2':
         reg2 = 0
         for A_t_edges_weights in A_edges_weights:
@@ -256,11 +300,38 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
     # Cost function
     if loss_type == 'l2':
         if robust:
-            m.setObjective(robust_objective + lambda1 * reg / d + lambda2 * reg2 / d, GRB.MINIMIZE)
+            m.setObjective(
+                robust_objective
+                + lambda1 * reg / d
+                + lambda2 * reg2 / d
+                + edge_count_term,
+                GRB.MINIMIZE,
+            )
         else:
-            m.setObjective(gp.quicksum((X[i,j] - gp.quicksum(X[i, k] * W_edges_weights[k, j] for k in range(d) if k != j)
-                                        - gp.quicksum(Y[t][i, k] * A_edges_weights[t][k, j] for k in range(d) for t in range(p))
-                                        )**2 for i in range(n) for j in range(d))/n + lambda1 * reg / d + lambda2 * reg2 / d, GRB.MINIMIZE)
+            m.setObjective(
+                gp.quicksum(
+                    (
+                        X[i, j]
+                        - gp.quicksum(
+                            X[i, k] * W_edges_weights[k, j]
+                            for k in range(d)
+                            if k != j
+                        )
+                        - gp.quicksum(
+                            Y[t][i, k] * A_edges_weights[t][k, j]
+                            for k in range(d)
+                            for t in range(p)
+                        )
+                    ) ** 2
+                    for i in range(n)
+                    for j in range(d)
+                )
+                / n
+                + lambda1 * reg / d
+                + lambda2 * reg2 / d
+                + edge_count_term,
+                GRB.MINIMIZE,
+            )
             #print(m.getObjective().getValue())
     elif loss_type == 'l1':
 
@@ -280,7 +351,13 @@ def solve(X, cfg: DictConfig, w_threshold, Y=None, B_ref=None, tabu_edges=None):
         #             m.addConstr(-W_edges_weights[v1,v2] <= abs_edges_weights[v1,v2])
 
 
-        m.setObjective(gp.quicksum(abs_vars[i,j] for i in range(n) for j in range(d))/n + lambda1 * reg / d + lambda2 * reg2 / d, GRB.MINIMIZE)
+        m.setObjective(
+            gp.quicksum(abs_vars[i, j] for i in range(n) for j in range(d)) / n
+            + lambda1 * reg / d
+            + lambda2 * reg2 / d
+            + edge_count_term,
+            GRB.MINIMIZE,
+        )
 
     m.Params.lazyConstraints = 1
     m.Params.MIPGap = target_mip_gap

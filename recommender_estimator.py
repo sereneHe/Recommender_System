@@ -18,6 +18,7 @@ from sklearn.linear_model import LinearRegression
 from hc_predictor import fit_aug_lagrangian_nn_constraint as fit_hc_lagrangian_nn_constraint
 from nn_causal_constraints_lagrangian import (
     fit_aug_lagrangian_nn_constraint as fit_ci_ce_lagrangian_nn_constraint,
+    w_constraint_source,
 )
 import solve_milp
 from compute_tools import percentile_mask
@@ -597,6 +598,12 @@ class RecommenderBaseEstimator(BaseEstimator):
         self._raw_sem_w_est = None
         self._w_matrix_space_ = "model_standardized"
         if self.cfg.recalculate_dag:
+            logging.info(
+                "W source: estimated DAG via MILP (recalculate_dag=true, "
+                "backend=%s); constraint_source=%s.",
+                getattr(self.cfg, "dag_solver_backend", "milp"),
+                w_constraint_source(self.cfg),
+            )
             return self._record_w_est_metadata(
                 self._recalculate_or_load_w_est(source_prep_data, current_column_names),
                 current_column_names,
@@ -614,6 +621,11 @@ class RecommenderBaseEstimator(BaseEstimator):
                 "continuing with recalculate_dag=false training.",
                 len(missing_names),
                 ", ".join(missing_names[:5]),
+            )
+            logging.info(
+                "W source: MILP fallback (supplied W artifact lacks active columns); "
+                "constraint_source=%s.",
+                w_constraint_source(self.cfg),
             )
             return self._record_w_est_metadata(
                 self._recalculate_or_load_w_est(source_prep_data, current_column_names),
@@ -656,6 +668,13 @@ class RecommenderBaseEstimator(BaseEstimator):
                 self._w_matrix_space_ = "raw_sem_coefficients_transformed_to_model_standardized"
             else:
                 self._w_matrix_space_ = "raw_sem_graph_only"
+        logging.info(
+            "W source: using supplied true W (no MILP) for %d active columns; "
+            "recalculate_dag=false, w_matrix_space=%s, constraint_source=%s.",
+            len(current_column_names) + 1,
+            self._w_matrix_space_,
+            w_constraint_source(self.cfg),
+        )
         return self._record_w_est_metadata(w_est, current_column_names)
 
 
@@ -754,9 +773,9 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
         y_fit = y
         X_val = None
         y_val = None
-        use_validation = self.use_validation_selection and bool(
-            getattr(self.cfg, "use_validation", True)
-        )
+        use_validation = bool(
+            getattr(self.cfg, "use_validation_selection", self.use_validation_selection)
+        ) and bool(getattr(self.cfg, "use_validation", True))
         if use_validation:
             val_fraction = float(getattr(self.cfg, "validation_fraction", 0.2))
             if 0.0 < val_fraction < 1.0 and len(y) >= 3:
@@ -828,6 +847,32 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             )
 
         w_est = self._get_w_est_for_fit(current_column_names, dag_prep_data=dag_prep_data)
+        w_constraint_mode = str(
+            getattr(self.cfg, "w_constraint_mode", "legacy_global")
+        ).strip().lower()
+        target_residual_intercept = 0.0
+        if (
+            w_constraint_mode == "target_residual"
+            and self._raw_sem_w_est is not None
+        ):
+            # A raw structural equation Y = Pa_Y beta + eps becomes
+            # y_std = Pa_std beta_std + intercept + eps_std after centering.
+            # The training constraint must include that fold-local intercept;
+            # otherwise even the analytic oracle appears to violate it.
+            raw_w = np.asarray(self._raw_sem_w_est, dtype=float)
+            raw_target_coefficients = raw_w[:-1, -1]
+            raw_parent_indices = np.flatnonzero(
+                np.abs(raw_target_coefficients)
+                > float(getattr(self.cfg, "w_prediction_dependent_eps", 1e-8))
+            )
+            raw_x_fit = np.asarray(X_fit, dtype=float)
+            target_residual_intercept = float(
+                raw_x_fit[:, raw_parent_indices].mean(axis=0)
+                @ raw_target_coefficients[raw_parent_indices]
+                - float(self._y_mean)
+            ) / float(self._y_std)
+        with open_dict(self.cfg):
+            self.cfg.w_target_residual_intercept = target_residual_intercept
 
         self._rf_model_, lam = self.fit_lagrangian_nn_constraint(
             X,
@@ -838,6 +883,10 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
             y_val=y_val_scaled,
         )
         self.validation_history_ = getattr(self._rf_model_, "validation_history_", None)
+        self.gradient_conflict_history_ = [
+            dict(row)
+            for row in getattr(self._rf_model_, "gradient_conflict_history_", [])
+        ]
         self.constraint_counts_ = getattr(self._rf_model_, "constraint_counts_", None)
         if isinstance(self.constraint_counts_, dict):
             self.constraint_counts_ = dict(self.constraint_counts_)
@@ -1021,13 +1070,10 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
         # Provenance for the audit: where the constraint structure came from and
         # which oracle (if any) judged it.  ``true_dag`` means the constraints
         # were built on the supplied (synthetic-truth) W, i.e. recalculate_dag
-        # was off; otherwise the DAG was estimated.
+        # was off; otherwise the DAG was estimated.  The rule lives in
+        # ``w_constraint_source`` so the training log and this row agree.
         _oracle_mode = str(getattr(self.cfg, "constraint_audit_oracle", "none")).strip().lower()
-        _recalc_dag = bool(getattr(self.cfg, "recalculate_dag", True))
-        constraint_source = (
-            "true_dag" if (_oracle_mode.startswith("synthetic") and not _recalc_dag)
-            else "estimated_dag"
-        )
+        constraint_source = w_constraint_source(self.cfg)
         if _oracle_mode == "synthetic_generator_oracle":
             oracle_type = str(
                 getattr(self.cfg, "constraint_audit_oracle_mechanism", "linear") or "linear"
@@ -1287,6 +1333,9 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
                 if oracle_raw is None or raw_target_weights is None
                 else oracle_raw - raw_x @ raw_target_weights
             )
+            w_constraint_mode = str(
+                getattr(self._rf_model_, "w_constraint_mode_", "legacy_global")
+            )
             for coordinate in range(weights.shape[0]):
                 variable_name = names[coordinate] if coordinate < len(names) else f"x{coordinate}"
                 w_rows.append(
@@ -1295,6 +1344,8 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
                         "stage": stage,
                         "coordinate": coordinate,
                         "variable": variable_name,
+                        "constraint_form": "legacy_global_diagnostic",
+                        "active_constraint": w_constraint_mode == "legacy_global",
                         "mean_moment_space": f"model_standardized_xy_with_{self._w_matrix_space_}",
                         "structural_target_space": (
                             "raw_xy_with_true_raw_sem_W"
@@ -1339,6 +1390,110 @@ class HCRecommenderPredictor(RecommenderBaseEstimator):
                         ),
                     }
                 )
+
+            # ``target_residual`` is a different constraint from the legacy
+            # global W mean moment.  Audit its actual moments separately so an
+            # oracle feasibility claim is about the condition trained by the
+            # network, not merely the older diagnostic vector above.
+            if w_constraint_mode == "target_residual":
+                parent_indices = [
+                    int(index)
+                    for index in getattr(
+                        self._rf_model_, "w_target_parent_indices_", []
+                    )
+                ]
+                parent_coefficients = np.asarray(
+                    getattr(
+                        self._rf_model_, "w_target_parent_coefficients_", []
+                    ),
+                    dtype=float,
+                )
+                target_residual_intercept = float(
+                    getattr(self._rf_model_, "w_target_residual_intercept_", 0.0)
+                )
+                if len(parent_indices) != len(parent_coefficients):
+                    raise RuntimeError(
+                        "Target-residual audit parent indices and coefficients differ in length."
+                    )
+                if any(index < 0 or index >= x_scaled.shape[1] for index in parent_indices):
+                    raise RuntimeError("Target-residual audit has an invalid parent index.")
+
+                def target_residual(response):
+                    parent_term = (
+                        x_scaled[:, parent_indices] @ parent_coefficients
+                        if parent_indices
+                        else np.zeros(x_scaled.shape[0], dtype=float)
+                    )
+                    return (
+                        np.asarray(response, dtype=float).reshape(-1)
+                        - parent_term
+                        - target_residual_intercept
+                    )
+
+                observed_target_residual = target_residual(y_observed)
+                prediction_target_residual = target_residual(y_prediction)
+                oracle_target_residual = (
+                    None if y_oracle is None else target_residual(y_oracle)
+                )
+                parent_names = [
+                    names[index] if index < len(names) else f"x{index}"
+                    for index in parent_indices
+                ]
+                moment_bases = [("constant", np.ones(x_scaled.shape[0], dtype=float))]
+                moment_bases.extend(
+                    (name, x_scaled[:, index])
+                    for name, index in zip(parent_names, parent_indices)
+                )
+                for moment_index, (basis_name, basis) in enumerate(moment_bases):
+                    w_rows.append(
+                        {
+                            "fold": int(fold),
+                            "stage": stage,
+                            "coordinate": None,
+                            "variable": str(self.target_col),
+                            "constraint_form": "target_residual",
+                            "active_constraint": True,
+                            "moment_index": moment_index,
+                            "moment_basis": basis_name,
+                            "target_parent_indices": ";".join(
+                                str(index) for index in parent_indices
+                            ),
+                            "target_parent_names": ";".join(parent_names),
+                            "target_parent_coefficients": ";".join(
+                                f"{coefficient:.10g}"
+                                for coefficient in parent_coefficients
+                            ),
+                            "target_residual_intercept": target_residual_intercept,
+                            "observed_moment": float(
+                                np.mean(basis * observed_target_residual)
+                            ),
+                            "prediction_moment": float(
+                                np.mean(basis * prediction_target_residual)
+                            ),
+                            "oracle_moment": (
+                                None
+                                if oracle_target_residual is None
+                                else float(
+                                    np.mean(basis * oracle_target_residual)
+                                )
+                            ),
+                            "observed_residual_rmse": float(
+                                np.sqrt(np.mean(np.square(observed_target_residual)))
+                            ),
+                            "prediction_residual_rmse": float(
+                                np.sqrt(np.mean(np.square(prediction_target_residual)))
+                            ),
+                            "oracle_residual_rmse": (
+                                None
+                                if oracle_target_residual is None
+                                else float(
+                                    np.sqrt(
+                                        np.mean(np.square(oracle_target_residual))
+                                    )
+                                )
+                            ),
+                        }
+                    )
 
         return metadata_rows, statistic_rows, w_rows
 

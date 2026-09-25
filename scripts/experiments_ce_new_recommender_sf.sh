@@ -29,6 +29,18 @@ N_INNER="${N_INNER:-100}"
 N_SAMPLES="${N_SAMPLES:-1000}"
 N_NODES="${N_NODES:-10}"
 EXPECTED_EDGES="${EXPECTED_EDGES:-15}"
+# Each arm can be resumed independently.  The combined ER/SF/Industry launcher
+# uses these switches after a partial SF run, so completed E0--E2 results are
+# never silently overwritten or needlessly recomputed.
+RUN_SF_E0="${RUN_SF_E0:-1}"
+RUN_SF_E1="${RUN_SF_E1:-1}"
+RUN_SF_E2="${RUN_SF_E2:-1}"
+RUN_SF_E3="${RUN_SF_E3:-1}"
+INCLUDE_BASELINES="${INCLUDE_BASELINES:-1}"
+
+for flag in RUN_SF_E0 RUN_SF_E1 RUN_SF_E2 RUN_SF_E3 INCLUDE_BASELINES; do
+  [[ "${!flag}" == "0" || "${!flag}" == "1" ]] || die "${flag} must be 0 or 1."
+done
 
 export HC_WEIBULL_GAUSSIANIZE=0
 export HC_CE_BD_MCMC="${HC_CE_BD_MCMC:-0}"
@@ -205,41 +217,49 @@ run_phase1_synthetic_tree_baseline() {
   done
 }
 
-# E0: no-constraint reference with the same HC-CE network and CV protocol.
-run_phase1_synthetic_ce_new "e0_no_constraint" \
-  "${COMMON[@]}" \
-  "solver.constrained=false" \
-  "solver.recalculate_dag=false" \
-  "solver.use_w_constraints=false" \
-  "solver.use_ci_penalty=false" \
-  "solver.constraint_audit_oracle=none"
+if [[ "${RUN_SF_E0}" == "1" ]]; then
+  # E0: no-constraint reference with the same HC-CE network and CV protocol.
+  run_phase1_synthetic_ce_new "e0_no_constraint" \
+    "${COMMON[@]}" \
+    "solver.constrained=false" \
+    "solver.recalculate_dag=false" \
+    "solver.use_w_constraints=false" \
+    "solver.use_ci_penalty=false" \
+    "solver.constraint_audit_oracle=none"
+fi
 
-# E1: true-W reference.
-run_phase1_synthetic_ce_new "e1_true_w" \
-  "${COMMON[@]}" \
-  "solver.constrained=true" \
-  "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
-  "solver.recalculate_dag=false" \
-  "solver.w_matrix_space=raw_sem" \
-  "solver.use_w_constraints=true" \
-  "solver.use_ci_penalty=false" \
-  "solver.constraint_audit_oracle=synthetic_linear_sem"
+if [[ "${RUN_SF_E1}" == "1" ]]; then
+  # E1: true-W reference.
+  run_phase1_synthetic_ce_new "e1_true_w" \
+    "${COMMON[@]}" \
+    "solver.constrained=true" \
+    "solver.ce_constraint_backend=${CE_CONSTRAINT_BACKEND}" \
+    "solver.recalculate_dag=false" \
+    "solver.w_matrix_space=raw_sem" \
+    "solver.use_w_constraints=true" \
+    "solver.use_ci_penalty=false" \
+    "solver.constraint_audit_oracle=synthetic_linear_sem"
+fi
 
-# E2: upgraded pure-CE (W disabled, so hub d-separations alone carry the task).
-run_phase1_synthetic_ce_new "e2_pure_ce_upgraded" \
-  "${COMMON[@]}" \
-  "${CE_COMMON[@]}" \
-  "solver.use_w_constraints=false"
+if [[ "${RUN_SF_E2}" == "1" ]]; then
+  # E2: upgraded pure-CE (W disabled, so hub d-separations alone carry the task).
+  run_phase1_synthetic_ce_new "e2_pure_ce_upgraded" \
+    "${COMMON[@]}" \
+    "${CE_COMMON[@]}" \
+    "solver.use_w_constraints=false"
+fi
 
-# E3: W + upgraded CE (recommended production arm for hub-heavy graphs).
-run_phase1_synthetic_ce_new "e3_w_plus_ce_upgraded" \
-  "${COMMON[@]}" \
-  "${CE_COMMON[@]}"
+if [[ "${RUN_SF_E3}" == "1" ]]; then
+  # E3: W + upgraded CE (recommended production arm for hub-heavy graphs).
+  run_phase1_synthetic_ce_new "e3_w_plus_ce_upgraded" \
+    "${COMMON[@]}" \
+    "${CE_COMMON[@]}"
+fi
 
 # B0--B2 are additional predictor baselines, paired with E0--E3 on the same
 # graph, innovation, model, and CV seeds.  Set INCLUDE_BASELINES=0 to omit
 # them during a quick CE-only screen.
-if [[ "${INCLUDE_BASELINES:-1}" == "1" ]]; then
+if [[ "${INCLUDE_BASELINES}" == "1" ]]; then
   HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
   run_phase1_synthetic_nn_baseline "b0_hc_predictor_${HC_BASELINE_BACKEND}" \
     "hc_predictor" "${HC_BASELINE_BACKEND}" "${BASELINE_NN_COMMON[@]}"

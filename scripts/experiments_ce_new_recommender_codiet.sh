@@ -8,9 +8,9 @@
 #   - W + CMI compared against a matched W-only predictor
 #   - ordinary batches in both arms, avoiding a sampling-policy confound
 #
-# STAGE=baseline runs mark, unconstrained HC-CE, and a W-only HC-CE control.
-# STAGE=discrete_cmi runs the W+CMI arm. Use the same seeds; compare CMI+W
-# against W-only to isolate the incremental contribution of CMI.
+# STAGE=baseline runs hc_predictor, mark, mark_with_cc, unconstrained HC-CE,
+# and a W-only HC-CE control. STAGE=discrete_cmi runs the W+CMI arm. Use the
+# same seeds; compare CMI+W against W-only to isolate the CMI contribution.
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/causal_predictor_plan/_common.sh"
 
@@ -30,6 +30,8 @@ DEPTH="${DEPTH:-2}"
 N_OUTER="${N_OUTER:-10}"
 N_INNER="${N_INNER:-100}"
 CMI_INDEPENDENCE_TOLERANCE="${CMI_INDEPENDENCE_TOLERANCE:-0.0}"
+INCLUDE_CLASSICAL_BASELINES="${INCLUDE_CLASSICAL_BASELINES:-1}"
+HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND:-alm}"
 
 export HC_WEIBULL_GAUSSIANIZE=0
 # CoDiet has no exact ground-truth graph for all problems; the knowledge graph
@@ -87,11 +89,81 @@ CMI_CE_COMMON=(
   "solver.constraint_audit_enabled=true"
 )
 
+run_classical_hc_baseline() {
+  local label="$1"
+  local backend="$2"
+  shift 2
+
+  local seed
+  for seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${seed}" =~ ^[0-9]+$ ]] || die "Invalid seed ${seed}."
+    export HC_SPBM_RANDOM_SEED="${seed}"
+    export HC_CONSTRAINT_BACKEND="${backend}"
+    if [[ -n "${HC_CE_BD_SEED_BASE:-}" ]]; then
+      export HC_CE_BD_SEED="$((HC_CE_BD_SEED_BASE + seed))"
+    fi
+    local -a seed_overrides=(
+      "solver.random_state=${seed}"
+      "solver.cv_random_state=$((seed + 10000))"
+      "solver.validation_random_state=$((seed + 20000))"
+    )
+    if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
+      run_hydra "${EXPERIMENT_PREFIX}_${label}_seed${seed}" "hc_predictor" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@" "${PLAN_EXTRA_OVERRIDES[@]}"
+    else
+      run_hydra "${EXPERIMENT_PREFIX}_${label}_seed${seed}" "hc_predictor" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@"
+    fi
+  done
+}
+
+run_classical_tree_baseline() {
+  local label="$1"
+  local solver="$2"
+  shift 2
+
+  local seed
+  for seed in "${PLAN_SEEDS[@]}"; do
+    [[ "${seed}" =~ ^[0-9]+$ ]] || die "Invalid seed ${seed}."
+    local -a seed_overrides=(
+      "solver.random_state=${seed}"
+      "solver.n_runs=${N_RUNS}"
+      "solver.recalculate_dag=true"
+      "solver.feature_selector=none"
+      "+solver.cv_strategy=site_gender"
+      "+solver.cv_time_test_size=null"
+      "+solver.cv_time_gap=0"
+    )
+    if (( ${#PLAN_EXTRA_OVERRIDES[@]} > 0 )); then
+      run_hydra "${EXPERIMENT_PREFIX}_${label}_seed${seed}" "${solver}" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@" "${PLAN_EXTRA_OVERRIDES[@]}"
+    else
+      run_hydra "${EXPERIMENT_PREFIX}_${label}_seed${seed}" "${solver}" "${PROBLEMS}" \
+        "${seed_overrides[@]}" "$@"
+    fi
+  done
+}
+
 case "${STAGE}" in
   baseline)
-    # Historical baseline: mark and unconstrained HC-CE, unchanged.
-    run_seeded "mark" "${EXPERIMENT_PREFIX}" "mark" "${PROBLEMS}" false \
-      "solver.n_runs=${N_RUNS}" "solver.recalculate_dag=true" "solver.feature_selector=none"
+    # Predictor baselines share the same problems, graph estimation policy,
+    # model/CV seeds, and training budget as the HC-CE controls below.
+    if [[ "${INCLUDE_CLASSICAL_BASELINES}" == "1" ]]; then
+      run_classical_hc_baseline "b0_hc_predictor_${HC_BASELINE_BACKEND}" "${HC_BASELINE_BACKEND}" \
+        "${COMMON[@]}" \
+        "solver.constrained=true" \
+        "solver.use_w_constraints=true" \
+        "solver.use_ci_penalty=false" \
+        "solver.w_matrix_space=model_standardized" \
+        "solver.validation_split_strategy=random" \
+        "solver.dag_fit_scope=inner_train" \
+        "solver.ce_use_balanced_batches=false" \
+        "solver.ce_batch_size=128" \
+        "solver.constraint_audit_enabled=true"
+      run_classical_tree_baseline "b1_mark" "mark"
+      run_classical_tree_baseline "b2_mark_with_cc" "mark_with_cc" \
+        "solver.n_outer=${N_OUTER}" "solver.time_limit=${TIME_LIMIT}"
+    fi
 
     run_seeded "hce_no_constraint" "${EXPERIMENT_PREFIX}" "hc_predictor_ce" "${PROBLEMS}" false \
       "${COMMON[@]}" \

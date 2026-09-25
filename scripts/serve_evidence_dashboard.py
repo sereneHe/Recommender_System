@@ -197,6 +197,218 @@ def start_refresh(force: bool = True):
 
 HTML = (PROGRESS / "dashboard.html")
 
+# Bilingual bridge injected into the served page so the Dashboard language
+# switch (Chinese <-> English) reaches this cross-origin iframe.  The parent
+# posts {type:"dashboard-i18n", lang} and the script rewrites only the rendered
+# interface text; all data and behaviour stay untouched.  It also honours
+# ?lang=en for the standalone "open in new window" case.
+I18N_BRIDGE = r'''<script id="dashboard-i18n-bridge">
+(function () {
+  var DICT = {
+    "Evidence Tree · 证明树": "Evidence Tree · Proof tree",
+    "实验记录流程图 · Evidence Tree": "Experiment evidence flow · Evidence Tree",
+    "frozen 已冻结": "frozen Frozen",
+    "gate_failed 门失败": "gate_failed Gate failed",
+    "holdout_confirmed holdout确认": "holdout_confirmed Holdout confirmed",
+    "holdout_running holdout运行中": "holdout_running Holdout running",
+    "registered 已注册": "registered Registered",
+    "running 运行中": "running Running",
+    "submitted 已提交": "submitted Submitted",
+    "synced 已同步": "synced Synced",
+    "validated 已验证": "validated Validated",
+    "← 唯一实质缺口": "← Sole substantial gap",
+    "↻ 一键刷新（同步服务器）": "↻ One-click refresh (sync server)",
+    "√ 已证": "√ Proven",
+    "≈ 等效": "≈ Equivalent",
+    "▶ 进行中": "▶ In progress",
+    "◻ 文献假设": "◻ Literature hypothesis",
+    "⚠ 待钉": "⚠ To pin down",
+    "✗ 已否": "✗ Disproven",
+    "上次同步": "Last sync",
+    "严格判定 (cohort · k=独立单位)": "Strict verdict (cohort · k=independent unit)",
+    "严格证据：仅": "Strict evidence: only",
+    "冻结": "frozen",
+    "或双击": "or double-click",
+    "指标": "Metric",
+    "方向 (pooled · 描述性)": "Direction (pooled · descriptive)",
+    "无法连接证据服务（端口 8770）。": "Cannot connect to the evidence service (port 8770).",
+    "比较明细 · comparisons": "Comparison details · comparisons",
+    "状态": "Status",
+    "管线状态 · pipeline（状态机）": "Pipeline status · pipeline (state machine)",
+    "自动同步：开": "Auto-sync: on",
+    "自动同步：关": "Auto-sync: off",
+    "自动同步：": "Auto-sync: ",
+    "请在终端运行：": "Run in the terminal:",
+    "配对覆盖": "Pair coverage",
+    "门失败定位 · gate failures（可复现原因）": "Gate failure localization · gate failures (reproducible causes)",
+    "（替代 Dashboard 第五步）": "(replaces Dashboard step 5)",
+    "；配对 unit = graph_seed×noise_seed / target×seed；判据 CI_lo>0 且 ≥5%。": "; pairing unit = graph_seed×noise_seed / target×seed; criterion CI_lo>0 and >=5%.",
+    "无失败门": "no failed gate",
+    "open · 硬门未满足": "open · hard gate not met",
+    "低于实用阈值": "Below practical threshold",
+    "低功效不确定": "Low-power inconclusive",
+    "刷新失败：": "Refresh failed: ",
+    "同步中…": "Syncing…",
+    "否定": "Negative",
+    "唯一实质缺口": "Sole substantial gap",
+    "实现◐": "Impl ◐",
+    "实现✓": "Impl ✓",
+    "实现✗": "Impl ✗",
+    "已否": "Disproven",
+    "已实现 · 未验证": "Implemented · unverified",
+    "已证": "Proven",
+    "待判定": "To be decided",
+    "待核验": "To be verified",
+    "待钉": "To pin down",
+    "指标无效": "Metric invalid",
+    "支持": "Support",
+    "文献假设": "Literature hypothesis",
+    "未验证": "Unverified",
+    "检查器已实现": "Checker implemented",
+    "正在同步服务器并重建证据…": "Syncing server and rebuilding evidence…",
+    "注册": "Registered",
+    "注册✓": "Registered ✓",
+    "等效": "Equivalent",
+    "等效(±5%)": "Equivalent (±5%)",
+    "缺失": "Missing",
+    "证据完整": "Evidence complete",
+    "证据缺失": "Evidence missing",
+    "证据部分": "Partial evidence",
+    "超范围": "Out of scope",
+    "进行中": "In progress",
+    "进行中 · 待配对": "In progress · awaiting pairing",
+    "配对无效": "Pairing invalid",
+    "文献假设：": "Literature hypothesis: ",
+    "比较明细": "Comparison details"
+  };
+  var PATTERNS = [
+    [/^待钉 · 正向 k=(.+)$/, "To pin · forward k=$1", /^To pin · forward k=(.+)$/, "待钉 · 正向 k=$1"],
+    [/^待钉 · 反向 k=(.+)$/, "To pin · reverse k=$1", /^To pin · reverse k=(.+)$/, "待钉 · 反向 k=$1"],
+    [/^待钉 · 近零 k=(.+)$/, "To pin · near-zero k=$1", /^To pin · near-zero k=(.+)$/, "待钉 · 近零 k=$1"],
+    [/^待钉 k=(.+)$/, "To pin down k=$1", /^To pin down k=(.+)$/, "待钉 k=$1"]
+  ];
+  var REV = {};
+  for (var k in DICT) { if (!Object.prototype.hasOwnProperty.call(REV, DICT[k])) REV[DICT[k]] = k; }
+  var ATTRS = ["placeholder", "title", "aria-label"];
+  var lang = "zh";
+  try { if (new URLSearchParams(window.location.search).get("lang") === "en") lang = "en"; } catch (e) {}
+  var observer = null;
+
+  function translate(value) {
+    if (!value) return value;
+    var map = lang === "en" ? DICT : REV;
+    if (Object.prototype.hasOwnProperty.call(map, value)) return map[value];
+    for (var i = 0; i < PATTERNS.length; i++) {
+      var p = PATTERNS[i];
+      var re = lang === "en" ? p[0] : p[2];
+      if (re.test(value)) return value.replace(re, lang === "en" ? p[1] : p[3]);
+    }
+    return value;
+  }
+  function ancestorTag(node, names) {
+    var el = node.nodeType === 1 ? node : node.parentNode;
+    while (el && el.nodeType === 1) {
+      if (names[el.tagName]) return true;
+      el = el.parentNode;
+    }
+    return false;
+  }
+  function isHard(node) { return ancestorTag(node, { SCRIPT: 1, STYLE: 1 }) || hasSkip(node); }
+  function hasSkip(node) {
+    var el = node.nodeType === 1 ? node : node.parentNode;
+    while (el && el.nodeType === 1) { if (el.hasAttribute && el.hasAttribute("data-i18n-skip")) return true; el = el.parentNode; }
+    return false;
+  }
+  function isRaw(node) { return ancestorTag(node, { PRE: 1, TEXTAREA: 1 }); }
+  function walkText(node) {
+    if (isHard(node)) return;
+    var raw = node.nodeValue || "";
+    var core = raw.trim();
+    if (!core) return;
+    var out;
+    if (isRaw(node)) {
+      var map = lang === "en" ? DICT : REV;
+      if (!Object.prototype.hasOwnProperty.call(map, core)) return;
+      out = map[core];
+    } else {
+      out = translate(core);
+    }
+    if (out === core) return;
+    var idx = raw.indexOf(core);
+    node.nodeValue = raw.slice(0, idx) + out + raw.slice(idx + core.length);
+  }
+  function walkAttrs(el) {
+    if (isHard(el) || isRaw(el)) return;
+    for (var i = 0; i < ATTRS.length; i++) {
+      var name = ATTRS[i];
+      var value = el.getAttribute(name);
+      if (!value) continue;
+      var out = translate(value);
+      if (out !== value) el.setAttribute(name, out);
+    }
+  }
+  function walk(root) {
+    if (root.nodeType === 3) { walkText(root); return; }
+    if (root.nodeType !== 1) return;
+    if (root.tagName === "SCRIPT" || root.tagName === "STYLE") return;
+    if (root.hasAttribute && root.hasAttribute("data-i18n-skip")) return;
+    walkAttrs(root);
+    var child = root.firstChild;
+    while (child) { var next = child.nextSibling; walk(child); child = next; }
+  }
+  function apply() {
+    document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
+    walk(document.body);
+    if (lang === "en") {
+      if (!observer && window.MutationObserver) {
+        observer = new MutationObserver(function (mutations) {
+          for (var i = 0; i < mutations.length; i++) {
+            var m = mutations[i];
+            if (m.type === "childList") {
+              m.addedNodes.forEach(function (node) { walk(node); });
+            } else if (m.type === "characterData") {
+              walkText(m.target);
+            } else if (m.type === "attributes") {
+              walkAttrs(m.target);
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS });
+      }
+    } else if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+  }
+  window.addEventListener("message", function (event) {
+    var data = event.data;
+    if (data && data.type === "dashboard-i18n" && (data.lang === "en" || data.lang === "zh")) {
+      if (data.lang !== lang) { lang = data.lang; apply(); }
+    }
+  });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", apply);
+  } else {
+    apply();
+  }
+})();
+</script>'''
+
+
+def render_html() -> bytes:
+    """Serve dashboard.html with the bilingual bridge injected before </body>."""
+    try:
+        text = HTML.read_text(encoding="utf-8")
+    except OSError:
+        return b"dashboard.html not built"
+    if "dashboard-i18n-bridge" not in text:
+        idx = text.lower().rfind("</body>")
+        if idx == -1:
+            text += I18N_BRIDGE
+        else:
+            text = text[:idx] + I18N_BRIDGE + text[idx:]
+    return text.encode("utf-8")
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):

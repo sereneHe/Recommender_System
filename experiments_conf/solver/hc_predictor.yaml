@@ -140,10 +140,16 @@ w_bias_calibration: false
 # "target_residual" uses target-parent conditional moments
 # E[phi_k(Pa_Y) * (Yhat - f_W(Pa_Y))] = 0 with phi in {1} U Pa_Y.
 w_constraint_mode: legacy_global
+# Fold-local intercept for the target-residual constraint after converting a
+# raw SEM W into standardized model coordinates.  The estimator sets it before
+# every fit; manual W experiments may leave it at zero.
+w_target_residual_intercept: 0.0
 # Diagnostic: log cos(grad MSE, grad constraint), ||grad constraint||/||grad MSE||
 # and ||g|| every N inner steps (0 disables).
 gradient_log_interval: 0
-# Optimization controls (applied once the constraint is informative).
+# Optimization controls (applied once the constraint is informative).  The
+# historical ``w_`` prefix remains for compatibility, but these controls apply
+# to every ALM constraint term, including CE-only P2 arms.
 #   w_warmup_fraction: fraction of inner steps that train MSE only before the
 #     constraint is switched on;
 #   w_warmup_ramp_fraction: fraction of steps over which the constraint term is

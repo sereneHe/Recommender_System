@@ -51,10 +51,15 @@ export PROBLEMS N_NODES EXPECTED_EDGES
 # A8 is a larger-sample regime; do not inherit the small-ER 1000-sample default.
 N_SAMPLES="${N_SAMPLES:-10000}"
 export N_SAMPLES
-# A8 uses its own seeds; the registry pins the exact SmoothER table.  Stage
-# scripts (scripts/test/_a8_stage.sh) set GRAPH_SEEDS/NOISE_SEEDS before this.
-export GRAPH_SEEDS="${GRAPH_SEEDS:-42 43 44 45 46}"
-export NOISE_SEEDS="${NOISE_SEEDS:-101 102 103}"
+# Seeds come from the stage policy (scripts/test/_a8_stage.sh), the single
+# source of truth shared with experiment_registry.yaml.  A hardcoded fallback
+# here duplicated a stale table, so a direct invocation of this script could
+# silently run a different unit set than the registered protocol.
+if [[ -z "${GRAPH_SEEDS:-}" || -z "${NOISE_SEEDS:-}" ]]; then
+  # shellcheck source=/dev/null
+  source "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../test" && pwd)/_a8_stage.sh"
+fi
+export GRAPH_SEEDS NOISE_SEEDS
 
 # Temporal cannot be judged by the CE question until a lag-aware oracle exists.
 if [[ "${MECHANISM}" == "temporal_smooth" ]]; then

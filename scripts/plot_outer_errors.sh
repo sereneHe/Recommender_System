@@ -2,7 +2,10 @@
 set -eu
 
 PROJECT_ROOT="${PROJECT_ROOT:-/Users/xiaoyuhe/Recommender_Pavel}"
-PYTHON="${PYTHON:-python3}"
+if [ -n "${PYTHON:-}" ]; then PYTHON_BIN="${PYTHON}"; fi
+. "${PROJECT_ROOT}/scripts/python_runtime.sh"
+project_python_require "${PROJECT_ROOT}"
+PYTHON="${PYTHON_BIN}"
 
 RUN_DIR="${RUN_DIR:-${PROJECT_ROOT}/multirun/2026-07-01/11-19-21/0}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-${PROJECT_ROOT}/mlruns/44/ed0bd195634e4d60bf365723144eb698/artifacts}"

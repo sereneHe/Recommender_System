@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Combined launcher for the still-unrun CE-new work:
-#   1. SF: E0--E3 plus the matched HC/Mark/Mark-CC baselines.
+#   1. SF: only the previously uncompleted E3 plus matched HC/Mark/Mark-CC.
 #   2. FRED industry CE pre-audit.
 #   3. ER: nonlinear method baselines (hc_predictor / mark / mark_with_cc).
 #
@@ -87,11 +87,12 @@ if [[ "${RUN_ER_NONLINEAR_BASELINES}" == "1" ]]; then
 fi
 
 if [[ "${RUN_SF}" == "1" ]]; then
-  run_stage "SF: E0--E3 + matched HC/Mark/Mark-CC baselines" \
+  run_stage "SF: resume E3 + matched HC/Mark/Mark-CC baselines" \
     run_child "${SCRIPT_DIR}/experiments_ce_new_recommender_sf.sh" env \
       GRAPH_SEEDS="${GRAPH_SEEDS}" NOISE_SEEDS="${NOISE_SEEDS}" \
       CE_CONSTRAINT_BACKEND="${CE_CONSTRAINT_BACKEND}" \
-      HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND}" INCLUDE_BASELINES=1 DRY_RUN="${DRY_RUN}" \
+      HC_BASELINE_BACKEND="${HC_BASELINE_BACKEND}" \
+      RUN_SF_E0=0 RUN_SF_E1=0 RUN_SF_E2=0 RUN_SF_E3=1 INCLUDE_BASELINES=1 DRY_RUN="${DRY_RUN}" \
       bash
 fi
 

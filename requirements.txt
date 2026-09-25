@@ -1,16 +1,26 @@
+# brew install python@3.11
+# /opt/homebrew/bin/python3.11 -m venv codiet311
+# source codiet311/bin/activate
+# pip install --upgrade pip
+
+numpy
+pandas
+scipy
 hydra-core
-hydra-submitit-launcher
 omegaconf
 mlflow
 networkx
-numpy
-pandas
-openpyxl
-odfpy
-matplotlib
-scipy
+pyarrow
 scikit-learn
+matplotlib
+seaborn
+joblib
+tqdm
+pyyaml
 xgboost
 torch
+openpyxl
+odfpy
+hydra-joblib-launcher
 gurobipy
 humancompatible-train

@@ -1,0 +1,153 @@
+#!/bin/bash
+#PBS -N exdbn_dnn
+#PBS -l walltime=24:00:00
+#PBS -l select=1:ncpus=2:mem=32gb:scratch_local=30gb
+#PBS -j oe
+
+set -euo pipefail
+
+PROJECT="${CODIET_PROJECT:-/storage/brno2/home/hexiaoyu/Recommender_Pavel}"
+WORK=$SCRATCHDIR/Recommender_Pavel
+OUT=$PROJECT/metacentrum_runs/$PBS_JOBID
+
+echo "Job $PBS_JOBID started at $(date)"
+echo "Node: $(hostname -f)"
+echo "Scratch: $SCRATCHDIR"
+
+mkdir -p "$OUT"
+
+SYNC_PID=""
+
+sync_outputs() {
+  mkdir -p "$OUT"
+  local rc=0
+  local name
+  # Hydra writes run-level artifacts under ``outputs`` while sweep artifacts
+  # are under ``multirun``.  Copy each existing tree separately: a single
+  # missing optional tree must not make rsync skip the trees that do exist.
+  for name in outputs multirun mlruns results; do
+    if [ -d "$WORK/$name" ]; then
+      mkdir -p "$OUT/$name"
+      if ! rsync -a "$WORK/$name/" "$OUT/$name/"; then
+        echo "ERROR: failed to sync $WORK/$name -> $OUT/$name" >&2
+        rc=1
+      fi
+    fi
+  done
+  return "$rc"
+}
+
+finish() {
+  status=$?
+  if [ -n "$SYNC_PID" ] && kill -0 "$SYNC_PID" 2>/dev/null; then
+    kill "$SYNC_PID" 2>/dev/null || true
+    wait "$SYNC_PID" 2>/dev/null || true
+  fi
+  echo "Copying final outputs back..."
+  sync_status=0
+  sync_outputs || sync_status=$?
+  if [ "$sync_status" -ne 0 ]; then
+    echo "ERROR: final artifact sync failed (status=$sync_status)" >&2
+    # A successful training run with missing artifacts is not a successful
+    # evidence run.  Make PBS report failure instead of silently accepting it.
+    if [ "$status" -eq 0 ]; then
+      status=74
+    fi
+  fi
+  if [ -d "$OUT" ]; then
+    printf 'experiment_status=%s\nartifact_sync_status=%s\n' "$status" "$sync_status" > "$OUT/stageout.status"
+  fi
+  clean_scratch || true
+  exit "$status"
+}
+
+trap finish EXIT
+
+# --- STANDARDIZED CLUSTER MODULE HOOKS ---
+module add python/3.11.11-gcc-10.2.1-555dlyc
+# Prefer the Linux venv rebuilt on praha1.  The brno2 codiet311 is a macOS
+# venv (its bin/python3.11 points at /opt/homebrew) and must NOT be used on the
+# cluster; fall back to it only if the Linux venv is missing.
+if [ -x /storage/praha1/home/hexiaoyu/codiet311_linux/bin/python ]; then
+  source /storage/praha1/home/hexiaoyu/codiet311_linux/bin/activate
+else
+  echo "WARNING: Linux venv codiet311_linux missing; falling back to $PROJECT/codiet311" >&2
+  source "$PROJECT/codiet311/bin/activate"
+fi
+# Export the resolved executable so every child shell script uses exactly the
+# same interpreter as the PBS job.  Do not let legacy ``python3`` defaults
+# select the module/system interpreter, which lacks pandas on login nodes.
+export PYTHON_BIN="$(command -v python)"
+"${PYTHON_BIN}" -c 'import pandas, yaml' || {
+  echo "ERROR: PBS Python lacks pandas/PyYAML: ${PYTHON_BIN}" >&2
+  exit 127
+}
+# ------------------------------------------
+
+rsync -a \
+  --exclude .git \
+  --exclude codiet311 \
+  --exclude metacentrum_runs \
+  --exclude multirun \
+  --exclude mlruns \
+  --exclude results \
+  "$PROJECT/" "$WORK/"
+
+cd "$WORK"
+
+export PYTHONPATH="$WORK:${PYTHONPATH:-}"
+export PYTHONNOUSERSITE=1
+export HYDRA_FULL_ERROR=1
+export GRB_LICENSE_FILE=/storage/praha1/home/hexiaoyu/gurobi.lic
+export KMP_DUPLICATE_LIB_OK=TRUE
+
+export OMP_NUM_THREADS=2
+export MKL_NUM_THREADS=2
+export OPENBLAS_NUM_THREADS=2
+export NUMEXPR_NUM_THREADS=2
+
+# --- FORCE MLFLOW TO USE THE SCRATCH DISK ROOT ---
+# This stops MLflow from defaulting to cached local /Users tracking backends
+export MLFLOW_TRACKING_URI="file://${WORK}/mlruns"
+export MLFLOW_ALLOW_FILE_STORE=true
+# -------------------------------------------------
+
+echo "Using python: $(which python)"
+echo "Running in: $(pwd)"
+echo "PYTHONPATH=$PYTHONPATH"
+
+# Start periodic sync in background
+while true; do
+  sync_outputs || echo "WARNING: periodic artifact sync failed" >&2
+  sleep 300
+done &
+SYNC_PID=$!
+echo "Background output sync started with PID $SYNC_PID"
+
+# --- RUN EXPERIMENT WITH HYDRA DIRECTORY OVERRIDES ---
+# The default remains the HC stability script.  RUN_MODE=tuner is used for
+# tune_causal_discovery_emukit.py, which does not use Hydra/MLflow but writes
+# its JSON artifacts under results/ for the same periodic sync.
+RUN_MODE="${RUN_MODE:-stability}"
+if [ "${RUN_MODE}" = "tuner" ]; then
+  python tune_causal_discovery_emukit.py ${TUNER_ARGS:-}
+else
+  # Override EXPERIMENT_SCRIPT in qsub to launch one staged plan script, e.g.
+  # qsub -v EXPERIMENT_SCRIPT=scripts/causal_predictor_plan/02_industry_hc_tuning.sh,...
+  EXPERIMENT_SCRIPT="${EXPERIMENT_SCRIPT:-scripts/test_hc_stability.sh}"
+  if [ ! -f "${EXPERIMENT_SCRIPT}" ]; then
+    echo "Experiment script not found: ${EXPERIMENT_SCRIPT}" >&2
+    exit 2
+  fi
+  bash "${EXPERIMENT_SCRIPT}" \
+    hydra.run.dir="${WORK}/outputs/\${now:%Y-%m-%d}/\${now:%H-%M-%S}" \
+    hydra.sweep.dir="${WORK}/multirun/\${now:%Y-%m-%d}/\${now:%H-%M-%S}"
+fi
+# -----------------------------------------------------
+
+# Stop the background loop cleanly
+kill "$SYNC_PID" 2>/dev/null || true
+wait "$SYNC_PID" 2>/dev/null || true
+SYNC_PID=""
+
+echo "Job $PBS_JOBID finished at $(date)"

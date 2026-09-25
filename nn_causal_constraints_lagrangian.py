@@ -314,6 +314,13 @@ def _fit_aug_lagrangian_nn_constraint_impl(
     target_index = d
     target_parents = []
     target_parent_coefs = torch.zeros(0, device=device)
+    # With a raw-SEM W transformed to standardized coordinates, centering X
+    # and y introduces a target-equation intercept.  The estimator computes
+    # it from the fold-local raw training data and exposes it here.  It is zero
+    # for W already estimated in standardized coordinates.
+    target_residual_intercept = float(
+        getattr(cfg, "w_target_residual_intercept", 0.0) or 0.0
+    )
     if use_w_constraints and w_constraint_mode == "target_residual":
         target_parents = [
             i for i in range(d) if abs(float(W[i, target_index])) > w_mask_eps
@@ -354,6 +361,15 @@ def _fit_aug_lagrangian_nn_constraint_impl(
     model.w_constraint_matrix_ = W.detach().cpu().numpy().copy()
     model.w_prediction_dependent_mask_ = w_rows_mask.detach().cpu().numpy()
     model.w_constraint_mode_ = w_constraint_mode
+    # Retain the exact target-residual specification for held-out auditing.
+    # The W matrix itself is already persisted, but recording this resolved
+    # subset prevents an audit from silently recomputing a different parent
+    # set after feature selection or coordinate scaling.
+    model.w_target_parent_indices_ = [int(index) for index in target_parents]
+    model.w_target_parent_coefficients_ = (
+        target_parent_coefs.detach().cpu().numpy().astype(float).tolist()
+    )
+    model.w_target_residual_intercept_ = target_residual_intercept
 
     dual_opt = ALM(
         m=n_w_constraints + n_ce_alm_constraints,
@@ -394,7 +410,7 @@ def _fit_aug_lagrangian_nn_constraint_impl(
     else:
         logging.info("W/DAG constraints disabled by use_w_constraints=false.")
     if bool(getattr(cfg, "ci_log_constraints", True)):
-        log_active_gurobi_edges(cfg, W)
+        log_active_w_edges(cfg, W)
         log_active_ci_constraints(
             cfg,
             W,
@@ -444,6 +460,12 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         )
     for outer in range(cfg.n_outer):
         g = torch.empty(0, device=device)
+        # During a pure-MSE warm-up ``g`` is intentionally empty.  Never pass
+        # that empty tensor to the ALM dual update: its dimension differs from
+        # the dual vector and, more importantly, there was no constraint
+        # evaluation from which a dual update could be justified.
+        outer_had_alm_constraints = False
+        outer_constraint_scale = 0.0
         for inner in range(cfg.n_inner):
             step_index = outer * int(cfg.n_inner) + inner
             if step_index < warmup_steps:
@@ -478,7 +500,7 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                             parent_term = X_batch[:, target_parents] @ target_parent_coefs
                         else:
                             parent_term = torch.zeros_like(yhat)
-                        r_y = yhat - parent_term
+                        r_y = yhat - (parent_term + target_residual_intercept)
                         phi = [torch.ones_like(r_y)]
                         phi += [X_batch[:, p] for p in target_parents]
                         g_parts.append(torch.stack([(phi_k * r_y).mean() for phi_k in phi]))
@@ -505,6 +527,9 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                     g_parts.append(ce_dep_eq)
                 g = torch.cat(g_parts) if g_parts else torch.empty(0, device=device, dtype=yhat.dtype)
                 aug_loss = dual_opt.forward(loss=mse, constraints=g) if g_parts else mse
+                if g_parts:
+                    outer_had_alm_constraints = True
+                    outer_constraint_scale = constraint_scale
                 if ce_pbm_dual_opt is not None:
                     ce_ineq_parts = []
                     if ce_backend == "pbm_all" and ce_independent_constraints:
@@ -548,6 +573,7 @@ def _fit_aug_lagrangian_nn_constraint_impl(
                             "cos_mse_constraint": cos,
                             "constraint_over_mse": ratio,
                             "constraint_norm": g_norm,
+                            "constraint_scale": constraint_scale,
                             "applied_constraint_scale": applied_scale,
                         }
                     )
@@ -599,12 +625,22 @@ def _fit_aug_lagrangian_nn_constraint_impl(
             optimizer.step()
             stochastic_opt.update_prox_center(model)
 
-        if cfg.constrained and len(dual_opt.duals) > 0:
+        if (
+            cfg.constrained
+            and len(dual_opt.duals) > 0
+            and outer_had_alm_constraints
+            and g.numel() == len(dual_opt.duals)
+        ):
             with torch.no_grad():
                 previous_duals = stochastic_opt.capture_duals(dual_opt)
-                dual_opt.update(g)
+                # Keep primal and dual schedules aligned during the linear
+                # ramp.  Without this factor, a nominal warm-up still drove
+                # duals using the full constraint violation.
+                dual_opt.update(g * outer_constraint_scale)
                 stochastic_opt.smooth_duals(dual_opt, previous_duals)
-                stochastic_opt.update_alm_penalty(dual_opt, g)
+                stochastic_opt.update_alm_penalty(
+                    dual_opt, g * outer_constraint_scale
+                )
             lam = dual_opt.duals.detach().numpy()
 
         for param_group in optimizer.param_groups:
@@ -729,6 +765,8 @@ def _fit_aug_lagrangian_nn_constraint_impl(
         "alm_constraints": n_ce_alm_constraints,
         "pbm_constraints": n_ce_pbm_constraints,
         "w_constraints": n_w_constraints,
+        "w_constraint_mode": w_constraint_mode,
+        "w_target_parent_count": len(target_parents),
         "active_w_edges": active_w_edges,
         "total_constraints": n_w_constraints
         + len(ce_independent_constraints)
@@ -1167,7 +1205,46 @@ def _ci_constraint_penalty_values(X, y, ci_constraints, penalty_kind, eps=1e-8, 
     return values
 
 
-def log_active_gurobi_edges(cfg, W):
+def w_constraint_source(cfg):
+    """Provenance of the constraint structure, mirroring the audit field.
+
+    Returns ``true_dag`` when the constraints are built on the supplied
+    (synthetic-truth) W, i.e. ``recalculate_dag`` is off, otherwise
+    ``estimated_dag``.  This is the exact rule used for the
+    ``constraint_source`` metadata row of the constraint audit, kept here so
+    the training log and the audit artifact cannot drift apart.
+    """
+    oracle_mode = str(getattr(cfg, "constraint_audit_oracle", "none")).strip().lower()
+    recalculate = bool(getattr(cfg, "recalculate_dag", True))
+    return (
+        "true_dag"
+        if (oracle_mode.startswith("synthetic") and not recalculate)
+        else "estimated_dag"
+    )
+
+
+def w_provenance(cfg):
+    """Human-readable origin of the W matrix handed to the constraints.
+
+    ``recalculate_dag=false`` means the supplied W artifact (the synthetic
+    truth for the evidence-tree arms) is sliced directly and no MILP is
+    solved.  The estimator logs the authoritative provenance because it also
+    sees the missing-column MILP fallback; this helper mirrors the requested
+    mode for the constraint-side log.
+    """
+    if bool(getattr(cfg, "recalculate_dag", True)):
+        return "estimated DAG via MILP"
+    return "using supplied true W (no MILP)"
+
+
+def log_active_w_edges(cfg, W):
+    """Log the W support the constraints act on.
+
+    Pure logging helper: it never calls a solver.  The previous name
+    (``log_active_gurobi_edges``) wrongly suggested a Gurobi solve even for
+    true-DAG arms, so it was renamed.  The printed provenance distinguishes a
+    supplied true W (no MILP) from a MILP-estimated DAG.
+    """
     if isinstance(W, torch.Tensor):
         W_np = W.detach().cpu().numpy()
     else:
@@ -1186,12 +1263,14 @@ def log_active_gurobi_edges(cfg, W):
                 edges.append((names[src], names[dst], weight))
 
     logging.info(
-        "Gurobi active W edges above %.3g: %d",
+        "Active W edges above %.3g: %d (constraint_source=%s; W: %s)",
         threshold,
         len(edges),
+        w_constraint_source(cfg),
+        w_provenance(cfg),
     )
     for src_name, dst_name, weight in edges:
-        logging.info("  Gurobi edge: %s -> %s weight=%+.6g", src_name, dst_name, weight)
+        logging.info("  W edge: %s -> %s weight=%+.6g", src_name, dst_name, weight)
 
 
 def log_active_ci_constraints(cfg, W, X, y, stage, ci_constraints=None):

@@ -188,6 +188,100 @@ def _read_legacy_selected_features(run_dir: Path) -> str:
     return ""
 
 
+_CONSTRAINT_COUNT_COLUMNS = (
+    "constraint_backend",
+    "independent_constraints",
+    "dependent_constraints",
+    "alm_constraints",
+    "pbm_constraints",
+    "w_constraints",
+    "w_constraint_mode",
+    "w_target_parent_count",
+    "active_w_edges",
+    "total_constraints",
+    "w_solver_selected_edges",
+    "w_solver_true_w_edges",
+    "w_solver_estimated_w_edges",
+    "w_solver_true_edge_tp",
+    "w_solver_false_positive_edges",
+    "w_solver_false_negative_edges",
+    "w_solver_edge_precision",
+    "w_solver_edge_recall",
+    "w_solver_edge_f1",
+    "w_solver_shd",
+    "w_solver_skeleton_jaccard",
+)
+
+
+def _empty_constraint_counts() -> dict[str, object]:
+    return {column: None for column in _CONSTRAINT_COUNT_COLUMNS}
+
+
+def _read_constraint_counts(run_dir: Path) -> dict[str, object]:
+    """Read the actual constraint counts recorded by a completed run."""
+    result = _empty_constraint_counts()
+    path = run_dir / "constraint_counts.csv"
+    if not path.exists():
+        return result
+    try:
+        counts = pd.read_csv(path)
+    except (OSError, pd.errors.ParserError, UnicodeError):
+        return result
+    if counts.empty:
+        return result
+
+    # Counts should be identical across folds for a fixed target. Prefer the
+    # initial fit as the representative row, then fall back to any available
+    # row for older/custom workflows.
+    if "stage" in counts.columns:
+        preferred = counts[counts["stage"].astype(str) == "initial_fit"]
+    else:
+        preferred = counts.iloc[0:0]
+    row = preferred.iloc[0] if not preferred.empty else counts.iloc[0]
+    if "backend" in row.index and pd.notna(row["backend"]):
+        result["constraint_backend"] = str(row["backend"])
+    for source, destination in (
+        ("independent_constraints", "independent_constraints"),
+        ("dependent_constraints", "dependent_constraints"),
+        ("alm_constraints", "alm_constraints"),
+        ("pbm_constraints", "pbm_constraints"),
+        ("w_constraints", "w_constraints"),
+        ("w_constraint_mode", "w_constraint_mode"),
+        ("w_target_parent_count", "w_target_parent_count"),
+        ("active_w_edges", "active_w_edges"),
+        ("total_constraints", "total_constraints"),
+        ("w_solver_selected_edges", "w_solver_selected_edges"),
+        ("w_solver_true_w_edges", "w_solver_true_w_edges"),
+        ("w_solver_estimated_w_edges", "w_solver_estimated_w_edges"),
+        ("w_solver_true_edge_tp", "w_solver_true_edge_tp"),
+        ("w_solver_false_positive_edges", "w_solver_false_positive_edges"),
+        ("w_solver_false_negative_edges", "w_solver_false_negative_edges"),
+        ("w_solver_edge_precision", "w_solver_edge_precision"),
+        ("w_solver_edge_recall", "w_solver_edge_recall"),
+        ("w_solver_edge_f1", "w_solver_edge_f1"),
+        ("w_solver_shd", "w_solver_shd"),
+        ("w_solver_skeleton_jaccard", "w_solver_skeleton_jaccard"),
+    ):
+        value = row.get(source)
+        if pd.notna(value):
+            try:
+                numeric = float(value)
+                result[destination] = (
+                    int(numeric) if numeric.is_integer() else numeric
+                )
+            except (TypeError, ValueError):
+                result[destination] = value
+    return result
+
+
+def _read_constraint_counts_from_artifact_uri(artifact_uri: str) -> dict[str, object]:
+    if not artifact_uri:
+        return _empty_constraint_counts()
+    if artifact_uri.startswith("file://"):
+        return _read_constraint_counts(Path(artifact_uri.removeprefix("file://")))
+    return _empty_constraint_counts()
+
+
 def _run_start_time(run_dir: Path) -> str:
     try:
         date_part = run_dir.parent.parent.name
@@ -312,6 +406,7 @@ def latest_multirun_runs_for_group(
                 "selected features": selected_features,
                 "runtime": runtime,
                 "setting": setting,
+                **_read_constraint_counts(run_dir),
             }
         )
         if seen_targets == target_set:
@@ -395,6 +490,7 @@ def latest_runs_for_group(
                 "train_error": row.get("metrics.train_error"),
                 "test_err": row.get("metrics.test_err"),
                 "selected_features_param": row.get("params.selected_features"),
+                **_empty_constraint_counts(),
             }
         )
         if seen_targets == target_set:
@@ -448,6 +544,9 @@ def main() -> None:
 
     def write_runs(runs: pd.DataFrame, output_name: str) -> Path:
         runs = runs.copy()
+        for column in _CONSTRAINT_COUNT_COLUMNS:
+            if column not in runs.columns:
+                runs[column] = pd.NA
         runs["problem_file"] = runs["target"].map(stems_by_target)
         runs["train_mean"] = runs["train_error"]
         runs["test_mean"] = runs["test_err"]
@@ -465,6 +564,7 @@ def main() -> None:
                 "run_id",
                 "start_time",
                 "runtime",
+                *_CONSTRAINT_COUNT_COLUMNS,
             ]
         ]
         runs = runs.sort_values("problem_file").reset_index(drop=True)
@@ -525,6 +625,9 @@ def main() -> None:
             runs["selected_features_param"].fillna(""),
         )
         runs["runtime"] = runs["run_id"].map(lambda run_id: client.get_run(run_id).data.metrics.get("runtime"))
+        constraint_counts = runs["artifact_uri"].map(_read_constraint_counts_from_artifact_uri)
+        for column in _CONSTRAINT_COUNT_COLUMNS:
+            runs[column] = constraint_counts.map(lambda values, name=column: values.get(name))
 
     output_name = args.output_name or args.group
     csv_path = write_runs(runs, output_name)

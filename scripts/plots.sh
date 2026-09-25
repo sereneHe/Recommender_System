@@ -4,7 +4,10 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT="${PROJECT_ROOT:-$(dirname "${SCRIPT_DIR}")}"
-PYTHON_EXEC="${PYTHON_EXEC:-${PROJECT_ROOT}/.venv/bin/python}"
+if [ -n "${PYTHON_EXEC:-}" ]; then PYTHON_BIN="${PYTHON_EXEC}"; fi
+. "${PROJECT_ROOT}/scripts/python_runtime.sh"
+project_python_require "${PROJECT_ROOT}"
+PYTHON_EXEC="${PYTHON_BIN}"
 
 PROBLEM_GROUPS="${PROBLEM_GROUPS:-FRED_16country_monthly}"
 SOLVERS="${SOLVERS:-${solver:-hc_predictor_ce,hc_predictor,mark_with_cc,mark}}"

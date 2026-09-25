@@ -4,6 +4,8 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${SCRIPT_DIR}/python_runtime.sh"
+project_python_require "${PROJECT_ROOT}"
 
 PROBLEM_GROUPS="${PROBLEM_GROUPS:-FRED_16country_monthly}"
 SOLVERS="${SOLVERS:-${solver:-hc_predictor_ce,hc_predictor,mark_with_cc}}"
@@ -32,6 +34,6 @@ EDGE_THRESHOLD="${EDGE_THRESHOLD:-0.05}"
 TOP_K_EDGES="${TOP_K_EDGES:-20}"
 
 # PROBLEM_GROUPS="${PROBLEM_GROUP}" SOLVERS="${SOLVERS}" PROBLEM="${PROBLEM}" TARGET="${TARGET}" PLOT_OUTPUT_DIR="${OUTPUT_DIR}" "${PYTHON}" "plot_fin_test_mean.py"
-PROBLEM_GROUPS="${PROBLEM_GROUP}" SOLVERS="${SOLVERS}" PROBLEM="${PROBLEM}" TARGET="${TARGET}" PLOT_OUTPUT_DIR="${OUTPUT_DIR}" "python3" "plot_test_mean_summary.py"
-PROBLEM_GROUPS="${PROBLEM_GROUP}" SOLVERS="${SOLVERS}" PROBLEM="${PROBLEM}" TARGET="${TARGET}" PLOT_OUTPUT_DIR="${OUTPUT_DIR}" "python3" "plot_methods_heatmap.py"
-"python3" "plot_map.py" --grid-report-adjacency --problem-group "${PROBLEM_GROUP}" --solver "${MAP_SOLVER}" --reports-root "${REPORTS_ROOT}" --multirun-root "${MULTIRUN_ROOT}" --output-root "${OUTPUT_DIR}" --group-output-name --edge-threshold "${EDGE_THRESHOLD}" --top-k-edges "${TOP_K_EDGES}"
+PROBLEM_GROUPS="${PROBLEM_GROUP}" SOLVERS="${SOLVERS}" PROBLEM="${PROBLEM}" TARGET="${TARGET}" PLOT_OUTPUT_DIR="${OUTPUT_DIR}" "${PYTHON_BIN}" "plot_test_mean_summary.py"
+PROBLEM_GROUPS="${PROBLEM_GROUP}" SOLVERS="${SOLVERS}" PROBLEM="${PROBLEM}" TARGET="${TARGET}" PLOT_OUTPUT_DIR="${OUTPUT_DIR}" "${PYTHON_BIN}" "plot_methods_heatmap.py"
+"${PYTHON_BIN}" "plot_map.py" --grid-report-adjacency --problem-group "${PROBLEM_GROUP}" --solver "${MAP_SOLVER}" --reports-root "${REPORTS_ROOT}" --multirun-root "${MULTIRUN_ROOT}" --output-root "${OUTPUT_DIR}" --group-output-name --edge-threshold "${EDGE_THRESHOLD}" --top-k-edges "${TOP_K_EDGES}"

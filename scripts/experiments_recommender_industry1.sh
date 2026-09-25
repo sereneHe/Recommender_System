@@ -1,49 +1,31 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
-export PYTHONPATH=$PYTHONPATH:../
+set -euo pipefail
 
-CMD="python3 run_experiments.py --multirun --config-name=config"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
 
-#RUN 9country Single#########################################################################################################################################################################################################################################################################################################################################################################################################################
-# PROBLEM_GROUP="FRED_9country_monthly"
-# # "FRED_9country_quarterly"
-# # "OECD_9country_monthly"
-# # "OECD_9country_quarterly"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+export MPLBACKEND="${MPLBACKEND:-Agg}"
+export HC_CONSTRAINT_BACKEND="${HC_CONSTRAINT_BACKEND:-alm}"
+export HC_WEIBULL_GAUSSIANIZE="${HC_WEIBULL_GAUSSIANIZE:-0}"
+export HC_WEIBULL_MODE="${HC_WEIBULL_MODE:-rand}"
 
-# ${CMD} experiment="INDUSTRY_RECOMMENDER" solver="hc_predictor_ce,mark_with_cc" problem="${PROBLEM_GROUP}/industry_eu_aut,${PROBLEM_GROUP}/industry_eu_bel,/${PROBLEM_GROUP}/industry_eu_deu,/${PROBLEM_GROUP}/industry_eu_fin,/${PROBLEM_GROUP}/industry_eu_fra,/${PROBLEM_GROUP}/industry_eu_ita,/${PROBLEM_GROUP}/industry_eu_lux,/${PROBLEM_GROUP}/industry_eu_nld,/${PROBLEM_GROUP}/industry_eu_prt"
+source "${SCRIPT_DIR}/python_runtime.sh"
+project_python_require "${REPO_ROOT}"
+CONFIG_NAME="${CONFIG_NAME:-config}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-INDUSTRY_RECOMMENDER_FRED_16COUNTRY_MONTHLY}"
+SOLVER="${SOLVER:-hc_predictor}"
+PROBLEM_GROUP="${PROBLEM_GROUP:-FRED_16country_monthly}"
+PROBLEMS="${PROBLEMS:-${PROBLEM_GROUP}/industry_eu_aut,${PROBLEM_GROUP}/industry_eu_bel,${PROBLEM_GROUP}/industry_eu_deu,${PROBLEM_GROUP}/industry_eu_esp,${PROBLEM_GROUP}/industry_eu_est,${PROBLEM_GROUP}/industry_eu_fin,${PROBLEM_GROUP}/industry_eu_fra,${PROBLEM_GROUP}/industry_eu_grc,${PROBLEM_GROUP}/industry_eu_irl,${PROBLEM_GROUP}/industry_eu_ita,${PROBLEM_GROUP}/industry_eu_ltu,${PROBLEM_GROUP}/industry_eu_lux,${PROBLEM_GROUP}/industry_eu_nld,${PROBLEM_GROUP}/industry_eu_prt,${PROBLEM_GROUP}/industry_eu_svk,${PROBLEM_GROUP}/industry_eu_svn}"
 
-#RUN 9country Group########################################################################################################################################################################################################################################################################################################################################################################################################################
-PROBLEM_GROUPS=(
-  "FRED_9country_monthly"
-  "FRED_9country_quarterly"
-  "OECD_9country_monthly"
-  "OECD_9country_quarterly"
-)
+echo "FRED 16-country monthly: solver=${SOLVER}, backend=${HC_CONSTRAINT_BACKEND}, weibull=${HC_WEIBULL_GAUSSIANIZE}/${HC_WEIBULL_MODE}"
 
-for PROBLEM_GROUP in "${PROBLEM_GROUPS[@]}"; do
-  echo "Running PROBLEM_GROUP=${PROBLEM_GROUP}"
-
-  ${CMD} experiment="INDUSTRY_RECOMMENDER" solver="mark_with_cc,hc_predictor_ce" problem="${PROBLEM_GROUP}/industry_eu_aut,${PROBLEM_GROUP}/industry_eu_bel,/${PROBLEM_GROUP}/industry_eu_deu,/${PROBLEM_GROUP}/industry_eu_fin,/${PROBLEM_GROUP}/industry_eu_fra,/${PROBLEM_GROUP}/industry_eu_ita,/${PROBLEM_GROUP}/industry_eu_lux,/${PROBLEM_GROUP}/industry_eu_nld,/${PROBLEM_GROUP}/industry_eu_prt"
-done
-
-#RUN 16country Single#########################################################################################################################################################################################################################################################################################################################################################################################################################
-# # PROBLEM_GROUP="FRED_16country_monthly"
-# # "FRED_16country_quarterly"
-# # "OECD_16country_monthly"
-# # "OECD_16country_quarterly"
-
-# ${CMD} experiment="INDUSTRY_RECOMMENDER" solver="hc_predictor_ce,mark_with_cc" problem="${PROBLEM_GROUP}/industry_eu_aut,${PROBLEM_GROUP}/industry_eu_bel,${PROBLEM_GROUP}/industry_eu_deu,${PROBLEM_GROUP}/industry_eu_esp,${PROBLEM_GROUP}/industry_eu_est,${PROBLEM_GROUP}/industry_eu_fin,${PROBLEM_GROUP}/industry_eu_fra,${PROBLEM_GROUP}/industry_eu_grc,${PROBLEM_GROUP}/industry_eu_irl,${PROBLEM_GROUP}/industry_eu_ita,${PROBLEM_GROUP}/industry_eu_ltu,${PROBLEM_GROUP}/industry_eu_lux,${PROBLEM_GROUP}/industry_eu_nld,${PROBLEM_GROUP}/industry_eu_prt,${PROBLEM_GROUP}/industry_eu_svk,${PROBLEM_GROUP}/industry_eu_svn"
-
-#RUN 16country Group#########################################################################################################################################################################################################################################################################################################################################################################################################################
-PROBLEM_GROUPS=(
-  #"FRED_16country_monthly"
-  "FRED_16country_quarterly"
-  "OECD_16country_monthly"
-  "OECD_16country_quarterly"
-)
-
-for PROBLEM_GROUP in "${PROBLEM_GROUPS[@]}"; do
-  echo "Running PROBLEM_GROUP=${PROBLEM_GROUP}"
-
-  ${CMD} experiment="INDUSTRY_RECOMMENDER" solver="hc_predictor_ce" problem="${PROBLEM_GROUP}/industry_eu_aut,${PROBLEM_GROUP}/industry_eu_bel,/${PROBLEM_GROUP}/industry_eu_deu,/${PROBLEM_GROUP}/industry_eu_fin,/${PROBLEM_GROUP}/industry_eu_fra,/${PROBLEM_GROUP}/industry_eu_ita,/${PROBLEM_GROUP}/industry_eu_lux,/${PROBLEM_GROUP}/industry_eu_nld,/${PROBLEM_GROUP}/industry_eu_prt"
-done
+"${PYTHON_BIN}" run_experiments.py \
+  --multirun \
+  --config-name="${CONFIG_NAME}" \
+  experiment="${EXPERIMENT_NAME}" \
+  solver="${SOLVER}" \
+  problem="${PROBLEMS}" \
+  "$@"
